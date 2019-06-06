@@ -69,7 +69,10 @@ local function docmd(cmdline, print, fd)
 			split[1] = cmdline
 			ok, list = pcall(cmd, split)
 		else
-			print("Invalid command, type help for command list")
+			ok, list = skynet.call("my_monitor", "lua", command, table.unpack(split,2))
+                        if not ok then
+                                print("Invalid command, type help for command list")
+                        end
 		end
 	end
 

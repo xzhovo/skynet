@@ -170,6 +170,9 @@ end
 
 -- Unsubscribe a channel, if the subscriber is empty and the channel is remote, send USUBR to the channel owner
 function command.USUB(source, c)
+	if not channel[c] then
+		return
+	end
 	local group = assert(channel[c])
 	if group[source] then
 		group[source] = nil

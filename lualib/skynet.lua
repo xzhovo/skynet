@@ -355,12 +355,16 @@ local function yield_call(service, session)
 	local succ, msg, sz = coroutine_yield "SUSPEND"
 	watching_session[session] = nil
 	if not succ then
-		error "call failed"
+		error ("call failed "..service..","..session)
 	end
 	return msg,sz
 end
 
 function skynet.call(addr, typename, ...)
+	if not addr then
+		local protoName = ...
+		error("call addr is nil, " .. protoName)
+	end
 	local tag = session_coroutine_tracetag[running_thread]
 	if tag then
 		c.trace(tag, "call", 2)
@@ -648,7 +652,16 @@ function skynet.harbor(addr)
 	return c.harbor(addr)
 end
 
-skynet.error = c.error
+-- skynet.error = c.error
+function skynet.error(str, ...)
+	-- t = {...}
+	-- for k,v in pairs(t) do
+	-- 	str = str .. ", " .. tostring(v)
+	-- end
+	local date=os.date("%Y-%m-%d %H:%M:%S: ") --这里改到service_logger.c中加可能更好,for对比下时效
+	c.error(date..str, ...)
+end
+
 skynet.tracelog = c.trace
 
 -- true: force on

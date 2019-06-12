@@ -161,7 +161,6 @@ function COMMAND.help()
 		debug = "debug address : debug a lua service",
 		signal = "signal address sig",
 		cmem = "Show C memory info",
-		shrtbl = "Show shared short string table info",
 		ping = "ping address",
 		call = "call address ...",
 		trace = "trace address [proto] [on|off]",
@@ -341,11 +340,6 @@ function COMMAND.cmem()
 	tmp.block = memory.block()
 
 	return tmp
-end
-
-function COMMAND.shrtbl()
-	local n, total, longest, space, slots, variance = memory.ssinfo()
-	return { n = n, total = total, longest = longest, space = space, slots = slots, average = n / slots, variace = variance }
 end
 
 function COMMAND.ping(address)

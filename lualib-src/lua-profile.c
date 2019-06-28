@@ -221,11 +221,8 @@ luaopen_skynet_profile(lua_State *L) {
 	lua_setfield(L, -2, "__mode"); // weaktable[__mode] = "kv""
 
 	lua_pushvalue(L, -1); // push "kv"
-	print("1%d", lua_gettop(L));
 	lua_setmetatable(L, -3); // pop weaktable setmetatable(totaltime, weaktable)
-	print("2%d", lua_gettop(L));
 	lua_setmetatable(L, -3); // pop totaltime setmetatable(starttime, totaltime)
-	print("3%d", lua_gettop(L));
 
 	lua_pushnil(L);	// cfunction (coroutine.resume or coroutine.yield)
 	luaL_setfuncs(L,l,3); // reg functions in l

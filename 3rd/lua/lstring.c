@@ -805,10 +805,10 @@ LUA_API int
 luaS_collectssm(struct ssm_collect *info) {
 	struct shrmap * s = &SSM;
 	if (s->total * 5 / 4 > s->rwslots) {
-		expandssm();
+		expandssm(); //double size
 	}
 	if (s->garbage > s->total / 8) {
-		info->sweep = sweepssm();
+		info->sweep = sweepssm(); //recycle
 	} else {
 		info->sweep = 0;
 	}
@@ -827,11 +827,12 @@ luaS_collectssm(struct ssm_collect *info) {
 				info->n = n;
 			}
 		}
-		return 1;
+		return 1; //continue loop
 	}
 	return 0;
 }
 
+// ssm初始化 (lua main已初始化
 LUA_API void
 luaS_initssm() {
 	struct shrmap * s = &SSM;

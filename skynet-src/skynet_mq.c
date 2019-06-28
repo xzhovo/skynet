@@ -242,9 +242,9 @@ skynet_mq_release(struct message_queue *q, message_drop drop_func, void *ud) {
 	
 	if (q->release) {
 		SPIN_UNLOCK(q)
-		_drop_queue(q, drop_func, ud);
+		_drop_queue(q, drop_func, ud); //删除消息队列
 	} else {
-		skynet_globalmq_push(q);
+		skynet_globalmq_push(q); //传入全局消息队列去执行
 		SPIN_UNLOCK(q)
 	}
 }

@@ -1,3 +1,4 @@
+--主节点调度
 local skynet = require "skynet"
 local socket = require "skynet.socket"
 
@@ -46,13 +47,13 @@ end
 local function report_slave(fd, slave_id, slave_addr)
 	local message = pack_package("C", slave_id, slave_addr)
 	local n = 0
-	for k,v in pairs(slave_node) do
+	for k,v in pairs(slave_node) do --广播所有节点注册该新节点
 		if v.fd ~= 0 then
 			socket.write(v.fd, message)
 			n = n + 1
 		end
 	end
-	socket.write(fd, pack_package("W", n))
+	socket.write(fd, pack_package("W", n)) --握手回复
 end
 
 local function handshake(fd)
@@ -62,8 +63,8 @@ local function handshake(fd)
 	if slave_node[slave_id] then
 		error(string.format("Slave %d already register on %s", slave_id, slave_node[slave_id].addr))
 	end
-	report_slave(fd, slave_id, slave_addr)
-	slave_node[slave_id] = {
+	report_slave(fd, slave_id, slave_addr) --广播并回复
+	slave_node[slave_id] = { --注册
 		fd = fd,
 		id = slave_id,
 		addr = slave_addr,
@@ -98,10 +99,10 @@ local function monitor_slave(slave_id, slave_address)
 	local fd = slave_node[slave_id].fd
 	skynet.error(string.format("Harbor %d (fd=%d) report %s", slave_id, fd, slave_address))
 	while pcall(dispatch_slave, fd) do end
-	skynet.error("slave " ..slave_id .. " is down")
+	skynet.error("slave " ..slave_id .. " is down") --直到节点gg
 	local message = pack_package("D", slave_id)
 	slave_node[slave_id].fd = 0
-	for k,v in pairs(slave_node) do
+	for k,v in pairs(slave_node) do --广播节点gg
 		socket.write(v.fd, message)
 	end
 	socket.close(fd)
@@ -114,9 +115,9 @@ skynet.start(function()
 	socket.start(fd , function(id, addr)
 		skynet.error("connect from " .. addr .. " " .. id)
 		socket.start(id)
-		local ok, slave, slave_addr = pcall(handshake, id)
+		local ok, slave, slave_addr = pcall(handshake, id) --握手并注册节点
 		if ok then
-			skynet.fork(monitor_slave, slave, slave_addr)
+			skynet.fork(monitor_slave, slave, slave_addr) --监听，其实就是循环接消息
 		else
 			skynet.error(string.format("disconnect fd = %d, error = %s", id, slave))
 			socket.close(id)

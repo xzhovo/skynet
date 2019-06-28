@@ -28,13 +28,13 @@ linfo(lua_State *L) {
 	lua_setfield(L, -2, "variance");
 
 	/*
-	garbage	36
-	garbage_size	1745
-	longest	5
-	n	168950
-	size	5670510
-	slots	144597
-	variance	0.17688798691222
+	garbage	36 辣鸡个数(all the follw is i guess)
+	garbage_size	1745 辣鸡大小
+	longest	5 最长长度
+	n	168950 个数
+	size	5670510 总大小
+	slots	144597 格子数
+	variance	0.17688798691222 变化幅度
 	 */
 
 	return 1;
@@ -56,9 +56,9 @@ lcollect(lua_State *L) {
 		int again = luaS_collectssm(&info);
 		if (again && lua_istable(L, 2)) {
 			lua_pushinteger(L, info.n);
-			lua_setfield(L, 2, "n");
+			lua_setfield(L, 2, "n"); //收集的短字符串数
 			lua_pushinteger(L, info.sweep);
-			lua_setfield(L, 2, "sweep");
+			lua_setfield(L, 2, "sweep"); //清理大小
 			lua_pushlightuserdata(L, info.key);
 			lua_setfield(L, 2, "key");
 		}

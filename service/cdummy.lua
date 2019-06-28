@@ -1,3 +1,5 @@
+--单节点使用，拦截对外广播的全局名字变更
+
 local skynet = require "skynet"
 require "skynet.manager"	-- import skynet.launch, ...
 
@@ -35,11 +37,11 @@ function harbor.REGISTER(name, handle)
 	assert(globalname[name] == nil)
 	globalname[name] = handle
 	response_name(name)
-	skynet.redirect(harbor_service, handle, "harbor", 0, "N " .. name)
+	skynet.redirect(harbor_service, handle, "harbor", 0, "N " .. name) --harbor_service全局命名
 end
 
 function harbor.QUERYNAME(name)
-	if name:byte() == 46 then	-- "." , local name
+	if name:byte() == 46 then	-- "." , local name 同进程直接拿
 		skynet.ret(skynet.pack(skynet.localname(name)))
 		return
 	end
@@ -67,7 +69,7 @@ end
 
 skynet.start(function()
 	local harbor_id = tonumber(skynet.getenv "harbor")
-	assert(harbor_id == 0)
+	assert(harbor_id == 0) --仅单节点模式可用
 
 	skynet.dispatch("lua", function (session,source,command,...)
 		local f = assert(harbor[command])

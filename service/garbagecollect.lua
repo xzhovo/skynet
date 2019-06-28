@@ -1,4 +1,6 @@
 local skynet = require "skynet"
+--lua根据长度将字符分为长字符串和短字符串，短字符存在global_State哈希表做复用，现需要跨虚拟机共享这些短字符串
+--https://blog.csdn.net/yuanlin2008/article/details/8423923
 local ssm = require "skynet.ssm" --lua-ssm.c
 
 local function ssm_info()
@@ -12,7 +14,7 @@ local function collect()
 --			skynet.error(string.format("Collect %d strings from %s, sweep %d", info.n, info.key, info.sweep))
 --		end
 		ssm.collect(true) --lcollect 收集
-		skynet.sleep(50)
+		skynet.sleep(50) --0.5秒
 	end
 end
 

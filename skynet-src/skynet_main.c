@@ -156,7 +156,7 @@ main(int argc, char *argv[]) {
 	config.daemon = optstring("daemon", NULL);
 	config.logger = optstring("logger", NULL);
 	config.logservice = optstring("logservice", "logger");
-	config.profile = optboolean("profile", 1);
+	config.profile = optboolean("profile", 1); //默认为 true, 可以用来统计每个服务使用了多少 cpu 时间。
 
 	lua_close(L);
 

@@ -149,16 +149,16 @@ local function co_create(f)
 	return co
 end
 
-local function dispatch_wakeup()
-	local token = tremove(wakeup_queue,1)
+local function dispatch_wakeup() --前辈挂起,唤醒后辈
+	local token = tremove(wakeup_queue,1) --返回第一个wakeup的协程token
 	if token then
-		local session = sleep_session[token]
+		local session = sleep_session[token] --获取协程session
 		if session then
-			local co = session_id_coroutine[session]
-			local tag = session_coroutine_tracetag[co]
-			if tag then c.trace(tag, "resume") end
-			session_id_coroutine[session] = "BREAK"
-			return suspend(co, coroutine_resume(co, false, "BREAK"))
+			local co = session_id_coroutine[session] --获取协程??token~=co??
+			local tag = session_coroutine_tracetag[co] --加入打印栈
+			if tag then c.trace(tag, "resume") end --打印命名resume
+			session_id_coroutine[session] = "BREAK" --将状态置为正在唤醒
+			return suspend(co, coroutine_resume(co, false, "BREAK")) --唤醒co协程,挂起或者退出调用suspend切换到其他wakeup协程或退出服务
 		end
 	end
 end
@@ -209,13 +209,13 @@ function skynet.timeout(ti, func)
 end
 
 local function suspend_sleep(session, token)
-	local tag = session_coroutine_tracetag[running_thread]
-	if tag then c.trace(tag, "sleep", 2) end
-	session_id_coroutine[session] = running_thread
+	local tag = session_coroutine_tracetag[running_thread] --该协程是否需要打印栈
+	if tag then c.trace(tag, "sleep", 2) end --打印事件命名sleep, 至多2层函数
+	session_id_coroutine[session] = running_thread --session to 协程
 	assert(sleep_session[token] == nil, "token duplicative")
-	sleep_session[token] = session
+	sleep_session[token] = session --该协程标记上session并加入sleep_session
 
-	return coroutine_yield "SUSPEND"
+	return coroutine_yield "SUSPEND" --挂起,返回"SUSPEND"给resume,最终在suspend唤醒其他wait协程
 end
 
 function skynet.sleep(ti, token)
@@ -238,10 +238,10 @@ function skynet.yield()
 	return skynet.sleep(0)
 end
 
-function skynet.wait(token)
+function skynet.wait(token) --让协程挂起等待 token默认为coroutine.running()
 	local session = c.genid()
 	token = token or coroutine.running()
-	local ret, msg = suspend_sleep(session, token)
+	local ret, msg = suspend_sleep(session, token) --函数暂时终止(未返回),再次resume时继续并返回
 	sleep_session[token] = nil
 	session_id_coroutine[session] = nil
 end
@@ -483,7 +483,7 @@ function skynet.retpack(...)
 	return skynet.ret(skynet.pack(...))
 end
 
-function skynet.wakeup(token)
+function skynet.wakeup(token) --running协程逻辑执行完，token为第一个等待协程
 	if sleep_session[token] then
 		tinsert(wakeup_queue, token)
 		return true

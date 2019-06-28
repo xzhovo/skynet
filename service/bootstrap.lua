@@ -39,10 +39,10 @@ skynet.start(function()
 	end
 
 	if standalone then
-		local datacenter = skynet.newservice "datacenterd"
+		local datacenter = skynet.newservice "datacenterd" --跨节点数据共享
 		skynet.name("DATACENTER", datacenter)
 	end
-	skynet.newservice "service_mgr"
+	skynet.newservice "service_mgr" --服务管理
 	pcall(skynet.newservice,skynet.getenv "start" or "main")
 	skynet.exit()
 end)

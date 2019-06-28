@@ -626,7 +626,7 @@ end
 
 function skynet.uniqueservice(global, ...)
 	if global == true then
-		return assert(skynet.call(".service", "lua", "GLAUNCH", ...))
+		return assert(skynet.call(".service", "lua", "GLAUNCH", ...)) -- .service == service_mgr
 	else
 		return assert(skynet.call(".service", "lua", "LAUNCH", global, ...))
 	end

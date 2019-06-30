@@ -18,6 +18,12 @@
 #define MQ_IN_GLOBAL 1
 #define MQ_OVERLOAD 1024
 
+/*skynet包含两级消息队列，一个global_mq，他包含一个head和tail指针，分别指向次级消息队列的头部和尾部，
+另外还有一个次级消息队列，这个一个单向链表。
+消息的派发机制是，工作线程，会从global_mq里pop一个次级消息队列来，然后从次级消息队列中，pop出一个消息，
+并传给context的callback函数，在完成驱动以后，再将次级消息队列push回global_mq中
+*/
+
 struct message_queue {
 	struct spinlock lock;
 	uint32_t handle;

@@ -3,6 +3,8 @@
 
 #ifndef USE_PTHREAD_LOCK
 
+//写者是排他性的，一个读写锁同时只能有一个写者或多个读者（与CPU数相关），但不能同时既有读者又有写者。
+
 struct rwlock {
 	int write;
 	int read;
@@ -17,12 +19,12 @@ rwlock_init(struct rwlock *lock) {
 static inline void
 rwlock_rlock(struct rwlock *lock) {
 	for (;;) {
-		while(lock->write) {
-			__sync_synchronize();
+		while(lock->write) { //写的时候不能读
+			__sync_synchronize(); //內存屏障 避免内存乱序
 		}
-		__sync_add_and_fetch(&lock->read,1);
-		if (lock->write) {
-			__sync_sub_and_fetch(&lock->read,1);
+		__sync_add_and_fetch(&lock->read,1); //锁住
+		if (lock->write) { //写的时候不能读
+			__sync_sub_and_fetch(&lock->read,1); //回退
 		} else {
 			break;
 		}

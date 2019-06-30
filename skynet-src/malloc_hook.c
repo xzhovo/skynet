@@ -99,16 +99,17 @@ fill_prefix(char* ptr) {
 	return ptr;
 }
 
+//Jemalloc https://blog.csdn.net/xumaojun/article/details/82910186
 inline static void*
 clean_prefix(char* ptr) {
-	size_t size = je_malloc_usable_size(ptr);
-	struct mem_cookie *p = (struct mem_cookie *)(ptr + size - sizeof(struct mem_cookie));
+	size_t size = je_malloc_usable_size(ptr); //可用空间
+	struct mem_cookie *p = (struct mem_cookie *)(ptr + size - sizeof(struct mem_cookie)); //取出mem_cookie
 	uint32_t handle;
 	memcpy(&handle, &p->handle, sizeof(handle));
 #ifdef MEMORY_CHECK
 	uint32_t dogtag;
 	memcpy(&dogtag, &p->dogtag, sizeof(dogtag));
-	if (dogtag == MEMORY_FREETAG) {
+	if (dogtag == MEMORY_FREETAG) { //已经释放过了
 		fprintf(stderr, "xmalloc: double free in :%08x\n", handle);
 	}
 	assert(dogtag == MEMORY_ALLOCTAG);	// memory out of bounds
@@ -201,8 +202,8 @@ skynet_realloc(void *ptr, size_t size) {
 void
 skynet_free(void *ptr) {
 	if (ptr == NULL) return;
-	void* rawptr = clean_prefix(ptr);
-	je_free(rawptr);
+	void* rawptr = clean_prefix(ptr); //清理usable头部
+	je_free(rawptr); //完全释放
 }
 
 void *

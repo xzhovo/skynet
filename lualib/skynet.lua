@@ -360,14 +360,17 @@ local function yield_call(service, session)
 	return msg,sz
 end
 
+--skynet.send
+--local p = proto[typename]
+--return c.send(addr, p.id, 0 , p.pack(...))
 function skynet.call(addr, typename, ...)
 	if not addr then
 		local protoName = ...
 		error("call addr is nil, " .. protoName)
 	end
-	local tag = session_coroutine_tracetag[running_thread]
-	if tag then
-		c.trace(tag, "call", 2)
+	local tag = session_coroutine_tracetag[running_thread] --string.format(":%08x-%d",skynet.self(), traceid)
+	if tag then --消息跟踪日志
+		c.trace(tag, "call", 2) --2层
 		c.send(addr, skynet.PTYPE_TRACE, 0, tag)
 	end
 

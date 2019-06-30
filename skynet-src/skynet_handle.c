@@ -158,7 +158,7 @@ skynet_handle_grab(uint32_t handle) {
 
 uint32_t 
 skynet_handle_findname(const char * name) {
-	struct handle_storage *s = H;
+	struct handle_storage *s = H; //上下文管理器
 
 	rwlock_rlock(&s->lock);
 
@@ -166,7 +166,7 @@ skynet_handle_findname(const char * name) {
 
 	int begin = 0;
 	int end = s->name_count - 1;
-	while (begin<=end) {
+	while (begin<=end) { //二分法
 		int mid = (begin+end)/2;
 		struct handle_name *n = &s->name[mid];
 		int c = strcmp(n->name, name);

@@ -359,11 +359,13 @@ markref(struct ssm_ref *r, TString *s, int changeref) {
 	r->hash[slot] = s;
 }
 
+//标记为有引用，不gc
 void
 luaS_mark(global_State *g, TString *s) {
 	markref(g->strmark, s, 0);
 }
 
+//无引用也不gc
 void
 luaS_fix(global_State *g, TString *s) {
 	if (g->strfix == NULL)
@@ -822,7 +824,7 @@ luaS_collectssm(struct ssm_collect *info) {
 			if (info) {
 				info->key = cqueue->key;
 			}
-			int n = collectref(cqueue);
+			int n = collectref(cqueue); //更新引用数以便将0引用变辣鸡
 			if (info) {
 				info->n = n;
 			}
@@ -1002,7 +1004,7 @@ internshrstr(lua_State *L, const char *str, size_t l) {
 	if (ts == NULL) {
 		ts = add_string(h, str, l);
 	}
-	markref(G(L)->strsave, ts, 1);
+	markref(G(L)->strsave, ts, 1); //已经ssm的短串，引用+1
 	return ts;
 }
 

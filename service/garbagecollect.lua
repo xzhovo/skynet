@@ -1,5 +1,5 @@
 local skynet = require "skynet"
---lua根据长度将字符分为长字符串和短字符串，短字符存在global_State哈希表做复用，现需要跨虚拟机共享这些短字符串
+--lua根据长度将字符分为长字符串和短字符串，短字符存在global_State哈希表做复用，现需要跨虚拟机共享这些短字符串(lstring.c luaS_newlstr
 --https://blog.csdn.net/yuanlin2008/article/details/8423923
 local ssm = require "skynet.ssm" --lua-ssm.c
 

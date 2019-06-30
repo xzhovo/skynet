@@ -1,3 +1,4 @@
+//维护一个shared hash string map
 #define LUA_LIB
 
 #include <lua.h>
@@ -28,12 +29,12 @@ linfo(lua_State *L) {
 	lua_setfield(L, -2, "variance");
 
 	/*
-	garbage	36 辣鸡个数(all the follw is i guess)
+	garbage	36 辣鸡的桶个数
 	garbage_size	1745 辣鸡大小
-	longest	5 最长长度
-	n	168950 个数
+	longest	5 最长的桶的字符串个数
+	n	168950 总短字符串个数
 	size	5670510 总大小
-	slots	144597 格子数
+	slots	144597 桶数
 	variance	0.17688798691222 变化幅度
 	 */
 
@@ -60,7 +61,7 @@ lcollect(lua_State *L) {
 			lua_pushinteger(L, info.sweep);
 			lua_setfield(L, 2, "sweep"); //清理大小
 			lua_pushlightuserdata(L, info.key);
-			lua_setfield(L, 2, "key");
+			lua_setfield(L, 2, "key"); //所有共享的字符串
 		}
 		lua_pushboolean(L, again);
 		return 1;

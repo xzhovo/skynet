@@ -709,7 +709,7 @@ skynet_send(struct skynet_context * context, uint32_t source, uint32_t destinati
 		}
 		return -2;
 	}
-	_filter_args(context, type, &session, (void **)&data, &sz);
+	_filter_args(context, type, &session, (void **)&data, &sz); //处理donnotcopy和sessionid
 
 	if (source == 0) {
 		source = context->handle;
@@ -752,9 +752,9 @@ skynet_sendname(struct skynet_context * context, uint32_t source, const char * a
 		source = context->handle;
 	}
 	uint32_t des = 0;
-	if (addr[0] == ':') {
+	if (addr[0] == ':') { //:地址
 		des = strtoul(addr+1, NULL, 16);
-	} else if (addr[0] == '.') {
+	} else if (addr[0] == '.') { //.局部命名
 		des = skynet_handle_findname(addr + 1);
 		if (des == 0) {
 			if (type & PTYPE_TAG_DONTCOPY) {
@@ -762,18 +762,18 @@ skynet_sendname(struct skynet_context * context, uint32_t source, const char * a
 			}
 			return -1;
 		}
-	} else {
-		if ((sz & MESSAGE_TYPE_MASK) != sz) {
+	} else { //全网(harbor模式
+		if ((sz & MESSAGE_TYPE_MASK) != sz) { //#define MESSAGE_TYPE_MASK (SIZE_MAX >> 8)
 			skynet_error(context, "The message to %s is too large", addr);
 			if (type & PTYPE_TAG_DONTCOPY) {
 				skynet_free(data);
 			}
 			return -2;
 		}
-		_filter_args(context, type, &session, (void **)&data, &sz);
+		_filter_args(context, type, &session, (void **)&data, &sz); //处理stirng PTYPE_TAG_DONTCOPY和PTYPE_TAG_ALLOCSESSION;
 
 		struct remote_message * rmsg = skynet_malloc(sizeof(*rmsg));
-		copy_name(rmsg->destination.name, addr);
+		copy_name(rmsg->destination.name, addr); //全网length过长处理
 		rmsg->destination.handle = 0;
 		rmsg->message = data;
 		rmsg->sz = sz & MESSAGE_TYPE_MASK;
@@ -805,7 +805,7 @@ skynet_context_send(struct skynet_context * ctx, void * msg, size_t sz, uint32_t
 	smsg.data = msg;
 	smsg.sz = sz | (size_t)type << MESSAGE_TYPE_SHIFT;
 
-	skynet_mq_push(ctx->queue, &smsg);
+	skynet_mq_push(ctx->queue, &smsg); //插入局部队列
 }
 
 void 

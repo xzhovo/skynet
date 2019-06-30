@@ -1,35 +1,37 @@
+--默认的config.bootstrap，skynet运行的第二个服务(第一是logger)。通常通过这个服务把整个系统启动起来
+
 local skynet = require "skynet"
-local harbor = require "skynet.harbor"
+local harbor = require "skynet.harbor" --节点
 require "skynet.manager"	-- import skynet.launch, ...
 
 skynet.start(function()
-	local standalone = skynet.getenv "standalone"
+	local standalone = skynet.getenv "standalone" --是否是主节点
 
-	local launcher = assert(skynet.launch("snlua","launcher"))
-	skynet.name(".launcher", launcher)
+	local launcher = assert(skynet.launch("snlua","launcher")) --service_snlua-launcher.lua
+	skynet.name(".launcher", launcher) --绑定启动器
 
-	skynet.newservice "garbagecollect"
+	skynet.newservice "garbagecollect" --ssm
 
 	local harbor_id = tonumber(skynet.getenv "harbor" or 0)
-	if harbor_id == 0 then
+	if harbor_id == 0 then --单节点
 		assert(standalone ==  nil)
 		standalone = true
 		skynet.setenv("standalone", "true")
 
 		local ok, slave = pcall(skynet.newservice, "cdummy")
 		if not ok then
-			skynet.abort()
+			skynet.abort() --中止
 		end
-		skynet.name(".cslave", slave)
+		skynet.name(".cslave", slave)  --cdummy代理slave拦截组网消息
 
 	else
-		if standalone then
-			if not pcall(skynet.newservice,"cmaster") then
+		if standalone then --主节点
+			if not pcall(skynet.newservice,"cmaster") then --调度
 				skynet.abort()
 			end
 		end
 
-		local ok, slave = pcall(skynet.newservice, "cslave")
+		local ok, slave = pcall(skynet.newservice, "cslave") --组网消息转发
 		if not ok then
 			skynet.abort()
 		end
@@ -37,10 +39,10 @@ skynet.start(function()
 	end
 
 	if standalone then
-		local datacenter = skynet.newservice "datacenterd"
+		local datacenter = skynet.newservice "datacenterd" --跨节点数据共享
 		skynet.name("DATACENTER", datacenter)
 	end
-	skynet.newservice "service_mgr"
+	skynet.newservice "service_mgr" --服务管理
 	pcall(skynet.newservice,skynet.getenv "start" or "main")
 	skynet.exit()
 end)

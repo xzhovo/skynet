@@ -8,14 +8,14 @@ SERVICE_NAME = args[1]
 local main, pattern
 
 local err = {}
-for pat in string.gmatch(LUA_SERVICE, "([^;]+);*") do
+for pat in string.gmatch(LUA_SERVICE, "([^;]+);*") do --搜索文件
 	local filename = string.gsub(pat, "?", SERVICE_NAME)
 	local f, msg = loadfile(filename)
 	if not f then
 		table.insert(err, msg)
-	else
-		pattern = pat
-		main = f
+	else --直到找到
+		pattern = pat --位置
+		main = f --一般是skynet.start
 		break
 	end
 end
@@ -45,4 +45,4 @@ if LUA_PRELOAD then
 	LUA_PRELOAD = nil
 end
 
-main(select(2, table.unpack(args)))
+main(select(2, table.unpack(args))) --丢掉args[1] lua服务start

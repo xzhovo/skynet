@@ -1,6 +1,7 @@
 local skynet = require "skynet"
 local c = require "skynet.core"
 
+--启动服务
 function skynet.launch(...)
 	local addr = c.command("LAUNCH", table.concat({...}," "))
 	if addr then

@@ -184,7 +184,7 @@ lintcommand(lua_State *L) {
 	char tmp[64];	// for integer parm
 	if (lua_gettop(L) == 2) {
 		if (lua_isnumber(L, 2)) {
-			int32_t n = (int32_t)luaL_checkinteger(L,2);
+			int32_t n = (int32_t)luaL_checkinteger(L,2); //ti(0.01秒 
 			sprintf(tmp, "%d", n);
 			parm = tmp;
 		} else {
@@ -231,27 +231,27 @@ get_dest_string(lua_State *L, int index) {
 
 static int
 send_message(lua_State *L, int source, int idx_type) {
-	struct skynet_context * context = lua_touserdata(L, lua_upvalueindex(1));
-	uint32_t dest = (uint32_t)lua_tointeger(L, 1);
+	struct skynet_context * context = lua_touserdata(L, lua_upvalueindex(1)); //服务上下文
+	uint32_t dest = (uint32_t)lua_tointeger(L, 1); //服务地址
 	const char * dest_string = NULL;
 	if (dest == 0) {
 		if (lua_type(L,1) == LUA_TNUMBER) {
 			return luaL_error(L, "Invalid service address 0");
 		}
-		dest_string = get_dest_string(L, 1);
+		dest_string = get_dest_string(L, 1); //服务名
 	}
 
 	int type = luaL_checkinteger(L, idx_type+0);
 	int session = 0;
 	if (lua_isnil(L,idx_type+1)) {
-		type |= PTYPE_TAG_ALLOCSESSION;
+		type |= PTYPE_TAG_ALLOCSESSION; //+PTYPE_TAG_ALLOCSESSION (type 不同位段存不同信息，这样可以存很多小type
 	} else {
-		session = luaL_checkinteger(L,idx_type+1);
+		session = luaL_checkinteger(L,idx_type+1); //自带session 自带0即不回复
 	}
 
 	int mtype = lua_type(L,idx_type+2);
 	switch (mtype) {
-	case LUA_TSTRING: {
+	case LUA_TSTRING: { //单个参数
 		size_t len = 0;
 		void * msg = (void *)lua_tolstring(L,idx_type+2,&len);
 		if (len == 0) {
@@ -264,7 +264,7 @@ send_message(lua_State *L, int source, int idx_type) {
 		}
 		break;
 	}
-	case LUA_TLIGHTUSERDATA: {
+	case LUA_TLIGHTUSERDATA: { //多个参数
 		void * msg = lua_touserdata(L,idx_type+2);
 		int size = luaL_checkinteger(L,idx_type+3);
 		if (dest_string) {

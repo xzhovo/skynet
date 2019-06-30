@@ -65,7 +65,7 @@
 */
 #define maskcolors	(~(bitmask(BLACKBIT) | WHITEBITS))
 #define makewhite(g,x)	\
- (x->marked = cast_byte((x->marked & maskcolors) | luaC_white(g)))
+ (x->marked = cast_byte((x->marked & maskcolors) | (x->marked & bitmask(SHAREBIT)) | luaC_white(g)))
 
 #define white2gray(x)	resetbits(x->marked, WHITEBITS)
 #define black2gray(x)	resetbit(x->marked, BLACKBIT)
@@ -236,6 +236,7 @@ GCObject *luaC_newobj (lua_State *L, int tt, size_t sz) {
 ** and turned black here. Other objects are marked gray and added
 ** to appropriate list to be visited (and turned black) later. (Open
 ** upvalues are already linked in 'headuv' list.)
+*白色对象集回收的部分；黑色对象集就是需要保留的部分；灰色对象集是黑色集和白色集的边界(保护的部分。
 */
 static void reallymarkobject (global_State *g, GCObject *o) {
  reentry:
@@ -756,7 +757,7 @@ static GCObject **sweeplist (lua_State *L, GCObject **p, lu_mem count) {
       freeobj(L, curr);  /* erase 'curr' */
     }
     else {  /* change mark to 'white' */
-      curr->marked = cast_byte((marked & maskcolors) | white);
+      curr->marked = cast_byte((marked & maskcolors) | (marked & bitmask(SHAREBIT)) |white);
       p = &curr->next;  /* go to next element */
     }
   }

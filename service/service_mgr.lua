@@ -1,3 +1,6 @@
+--用于 UniqueService 管理(专用于服务管理的模块，对于同一个名字，只允许启动一次，且不准更换
+--唯一服务，如果你需要整个网络有唯一的服务，那么可以在调用 uniqueservice 的参数前加一个 true ，表示这是一个全局服务。
+--如果这个服务不存在，这个 api 会一直阻塞到它启动好为止。
 local skynet = require "skynet"
 require "skynet.manager"	-- import skynet.register
 local snax = require "skynet.snax"
@@ -15,7 +18,7 @@ local function request(name, func, ...)
 		service[name] = tostring(handle)
 	end
 
-	for _,v in ipairs(s) do
+	for _,v in ipairs(s) do --唤醒func为阻塞函数时之后阻塞的相同操作协程
 		skynet.wakeup(v.co)
 	end
 
@@ -50,7 +53,7 @@ local function waitfor(name , func, ...)
 			source = source,
 			co = co,
 		}
-		return request(name, func, ...)
+		return request(name, func, ...) --第一个，直接请求
 	end
 
 	table.insert(s, {
@@ -58,7 +61,7 @@ local function waitfor(name , func, ...)
 		session = session,
 		source = source,
 	})
-	skynet.wait()
+	skynet.wait() --s.launch ~= nil 即已有协程操作了，将当前信息插入s
 	s = service[name]
 	if type(s) == "string" then
 		error(s)
@@ -147,7 +150,7 @@ local function register_global()
 		mgr[m] = true
 	end
 
-	local function add_list(all, m)
+	local function add_list(all, m) --统计所有子节点
 		local harbor = "@" .. skynet.harbor(m)
 		local result = skynet.call(m, "lua", "LIST")
 		for k,v in pairs(result) do
@@ -177,7 +180,7 @@ local function register_local()
 		else
 			local_name = global_name
 		end
-		return waitfor(local_name, skynet.call, "SERVICE", "lua", cmd, global_name, ...)
+		return waitfor(local_name, skynet.call, "SERVICE", "lua", cmd, global_name, ...) --询问主节点
 	end
 
 	function cmd.GLAUNCH(...)
@@ -188,7 +191,7 @@ local function register_local()
 		return waitfor_remote("QUERY", ...)
 	end
 
-	function cmd.LIST()
+	function cmd.LIST() --统计自己
 		return list_service()
 	end
 
@@ -218,10 +221,10 @@ skynet.start(function()
 	else
 		skynet.register(".service")
 	end
-	if skynet.getenv "standalone" then
-		skynet.register("SERVICE")
-		register_global()
+	if skynet.getenv "standalone" then --是主节点
+		skynet.register("SERVICE") --全网注册SERVICE
+		register_global() --全网函数直接访问
 	else
-		register_local()
+		register_local() --全网函数访问主节点
 	end
 end)

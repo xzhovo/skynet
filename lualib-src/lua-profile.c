@@ -149,23 +149,24 @@ lresume_co(lua_State *L) {
 	return timing_resume(L);
 }
 
+//计时
 static int
 timing_yield(lua_State *L) {
 #ifdef DEBUG_LOG
 	lua_State *from = lua_tothread(L, -1);
 #endif
-	lua_pushvalue(L, -1);
-	lua_rawget(L, lua_upvalueindex(2));	// check total time
-	if (lua_isnil(L, -1)) {
-		lua_pop(L,2);
+	lua_pushvalue(L, -1); // 复制线程压栈
+	lua_rawget(L, lua_upvalueindex(2));	// check total time  (把t[k]的值压栈，t闭包第二个upvalue，k线程副本 push upvalue totaltime[coroutine]
+	if (lua_isnil(L, -1)) { // total time == nil
+		lua_pop(L,2); // 弹出线程副本1
 	} else {
 		double ti = lua_tonumber(L, -1);
-		lua_pop(L,1);
+		lua_pop(L,1); // 弹出线程
 
-		lua_pushvalue(L, -1);	// push coroutine
-		lua_rawget(L, lua_upvalueindex(1));
+		lua_pushvalue(L, -1);	// push coroutine  (线程副本2
+		lua_rawget(L, lua_upvalueindex(1)); // starttime  (push upvalue starttime[coroutine]
 		double starttime = lua_tonumber(L, -1);
-		lua_pop(L,1);
+		lua_pop(L,1); // 弹出线程副本1
 
 		double diff = diff_time(starttime);
 		ti += diff;
@@ -175,18 +176,18 @@ timing_yield(lua_State *L) {
 
 		lua_pushvalue(L, -1);	// push coroutine
 		lua_pushnumber(L, ti);
-		lua_rawset(L, lua_upvalueindex(2));
+		lua_rawset(L, lua_upvalueindex(2)); // upvalue totaltime[coroutine]=ti
 		lua_pop(L, 1);	// pop coroutine
 	}
 
-	lua_CFunction co_yield = lua_tocfunction(L, lua_upvalueindex(3));
+	lua_CFunction co_yield = lua_tocfunction(L, lua_upvalueindex(3)); // upvalue c fun co_yield
 
 	return co_yield(L);
 }
 
 static int
 lyield(lua_State *L) {
-	lua_pushthread(L);
+	lua_pushthread(L); // 把L表示的线程压栈
 
 	return timing_yield(L);
 }
@@ -216,20 +217,20 @@ luaopen_skynet_profile(lua_State *L) {
 	lua_newtable(L);	// table thread->total time
 
 	lua_newtable(L);	// weak table
-	lua_pushliteral(L, "kv");
-	lua_setfield(L, -2, "__mode");
+	lua_pushliteral(L, "kv"); // push string "kv"
+	lua_setfield(L, -2, "__mode"); // weaktable[__mode] = "kv""
 
-	lua_pushvalue(L, -1);
-	lua_setmetatable(L, -3); 
-	lua_setmetatable(L, -3);
+	lua_pushvalue(L, -1); // push "kv"
+	lua_setmetatable(L, -3); // pop weaktable setmetatable(totaltime, weaktable)
+	lua_setmetatable(L, -3); // pop totaltime setmetatable(starttime, totaltime)
 
 	lua_pushnil(L);	// cfunction (coroutine.resume or coroutine.yield)
-	luaL_setfuncs(L,l,3);
+	luaL_setfuncs(L,l,3); // reg functions in l
 
 	int libtable = lua_gettop(L);
 
 	lua_getglobal(L, "coroutine");
-	lua_getfield(L, -1, "resume");
+	lua_getfield(L, -1, "resume"); // push coroutine.resume
 
 	lua_CFunction co_resume = lua_tocfunction(L, -1);
 	if (co_resume == NULL)

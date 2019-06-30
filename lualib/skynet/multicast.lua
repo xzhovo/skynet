@@ -71,7 +71,10 @@ local function dispatch_subscribe(channel, source, pack, msg, sz)
 	local self = dispatch[channel]
 	if not self then
 		mc.close(pack)
-		error ("Unknown channel " .. channel)
+		--在解绑前广播消息已发送，收到广播消息时，已解绑，无需收到该消息，自己暂时用return替换error
+		skynet.error("Unknown channel " .. channel)
+		return
+		--error ("Unknown channel " .. channel)
 	end
 
 	if self.__subscribe then

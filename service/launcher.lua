@@ -28,6 +28,8 @@ function command.STAT()
 		local ok, stat = pcall(skynet.call,k,"debug","STAT")
 		if not ok then
 			stat = string.format("ERROR (%s)",v)
+		else
+			stat.xname = tostring(v)
 		end
 		list[skynet.address(k)] = stat
 	end
@@ -44,14 +46,17 @@ end
 
 function command.MEM()
 	local list = {}
+	local totalKB = 0
 	for k,v in pairs(services) do
-		local ok, kb = pcall(skynet.call,k,"debug","MEM")
+		local ok, kb, bytes = pcall(skynet.call,k,"debug","MEM")
 		if not ok then
 			list[skynet.address(k)] = string.format("ERROR (%s)",v)
 		else
 			list[skynet.address(k)] = string.format("%.2f Kb (%s)",kb,v)
+			totalKB = totalKB + kb
 		end
 	end
+	list["total  mem"] = string.format("%.2f M",totalKB/1024)
 	return list
 end
 

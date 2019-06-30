@@ -149,16 +149,16 @@ local function co_create(f)
 	return co
 end
 
-local function dispatch_wakeup()
-	local token = tremove(wakeup_queue,1)
+local function dispatch_wakeup() --前辈挂起,唤醒后辈
+	local token = tremove(wakeup_queue,1) --返回第一个wakeup的协程token
 	if token then
-		local session = sleep_session[token]
+		local session = sleep_session[token] --获取协程session
 		if session then
-			local co = session_id_coroutine[session]
-			local tag = session_coroutine_tracetag[co]
-			if tag then c.trace(tag, "resume") end
-			session_id_coroutine[session] = "BREAK"
-			return suspend(co, coroutine_resume(co, false, "BREAK"))
+			local co = session_id_coroutine[session] --获取协程??token~=co??
+			local tag = session_coroutine_tracetag[co] --加入打印栈
+			if tag then c.trace(tag, "resume") end --打印命名resume
+			session_id_coroutine[session] = "BREAK" --将状态置为正在唤醒
+			return suspend(co, coroutine_resume(co, false, "BREAK")) --唤醒co协程,挂起或者退出调用suspend切换到其他wakeup协程或退出服务
 		end
 	end
 end
@@ -209,13 +209,13 @@ function skynet.timeout(ti, func)
 end
 
 local function suspend_sleep(session, token)
-	local tag = session_coroutine_tracetag[running_thread]
-	if tag then c.trace(tag, "sleep", 2) end
-	session_id_coroutine[session] = running_thread
+	local tag = session_coroutine_tracetag[running_thread] --该协程是否需要打印栈
+	if tag then c.trace(tag, "sleep", 2) end --打印事件命名sleep, 至多2层函数
+	session_id_coroutine[session] = running_thread --session to 协程
 	assert(sleep_session[token] == nil, "token duplicative")
-	sleep_session[token] = session
+	sleep_session[token] = session --该协程标记上session并加入sleep_session
 
-	return coroutine_yield "SUSPEND"
+	return coroutine_yield "SUSPEND" --挂起,返回"SUSPEND"给resume,最终在suspend唤醒其他wait协程
 end
 
 function skynet.sleep(ti, token)
@@ -238,10 +238,10 @@ function skynet.yield()
 	return skynet.sleep(0)
 end
 
-function skynet.wait(token)
+function skynet.wait(token) --让协程挂起等待 token默认为coroutine.running()
 	local session = c.genid()
 	token = token or coroutine.running()
-	local ret, msg = suspend_sleep(session, token)
+	local ret, msg = suspend_sleep(session, token) --函数暂时终止(未返回),再次resume时继续并返回
 	sleep_session[token] = nil
 	session_id_coroutine[session] = nil
 end
@@ -355,15 +355,22 @@ local function yield_call(service, session)
 	local succ, msg, sz = coroutine_yield "SUSPEND"
 	watching_session[session] = nil
 	if not succ then
-		error "call failed"
+		error ("call failed "..service..","..session)
 	end
 	return msg,sz
 end
 
+--skynet.send
+--local p = proto[typename]
+--return c.send(addr, p.id, 0 , p.pack(...))
 function skynet.call(addr, typename, ...)
-	local tag = session_coroutine_tracetag[running_thread]
-	if tag then
-		c.trace(tag, "call", 2)
+	if not addr then
+		local protoName = ...
+		error("call addr is nil, " .. protoName)
+	end
+	local tag = session_coroutine_tracetag[running_thread] --string.format(":%08x-%d",skynet.self(), traceid)
+	if tag then --消息跟踪日志
+		c.trace(tag, "call", 2) --2层
 		c.send(addr, skynet.PTYPE_TRACE, 0, tag)
 	end
 
@@ -479,7 +486,7 @@ function skynet.retpack(...)
 	return skynet.ret(skynet.pack(...))
 end
 
-function skynet.wakeup(token)
+function skynet.wakeup(token) --running协程逻辑执行完，token为第一个等待协程
 	if sleep_session[token] then
 		tinsert(wakeup_queue, token)
 		return true
@@ -622,7 +629,7 @@ end
 
 function skynet.uniqueservice(global, ...)
 	if global == true then
-		return assert(skynet.call(".service", "lua", "GLAUNCH", ...))
+		return assert(skynet.call(".service", "lua", "GLAUNCH", ...)) -- .service == service_mgr
 	else
 		return assert(skynet.call(".service", "lua", "LAUNCH", global, ...))
 	end
@@ -648,7 +655,16 @@ function skynet.harbor(addr)
 	return c.harbor(addr)
 end
 
-skynet.error = c.error
+-- skynet.error = c.error
+function skynet.error(str, ...)
+	-- t = {...}
+	-- for k,v in pairs(t) do
+	-- 	str = str .. ", " .. tostring(v)
+	-- end
+	local date=os.date("%Y-%m-%d %H:%M:%S: ") --这里改到service_logger.c中加可能更好,for对比下时效
+	c.error(date..str, ...)
+end
+
 skynet.tracelog = c.trace
 
 -- true: force on

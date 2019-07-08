@@ -400,9 +400,9 @@ struct command_func {
 static const char *
 cmd_timeout(struct skynet_context * context, const char * param) {
 	char * session_ptr = NULL;
-	int ti = strtol(param, &session_ptr, 10);
+	int ti = strtol(param, &session_ptr, 10); //string to int 10进制 不返回非法字符串
 	int session = skynet_context_newsession(context);
-	skynet_timeout(context->handle, ti, session);
+	skynet_timeout(context->handle, ti, session); //消息
 	sprintf(context->result, "%d", session);
 	return context->result;
 }
@@ -532,7 +532,7 @@ cmd_starttime(struct skynet_context * context, const char * param) {
 
 static const char *
 cmd_abort(struct skynet_context * context, const char * param) {
-	skynet_handle_retireall();
+	skynet_handle_retireall(); //退休吧
 	return NULL;
 }
 

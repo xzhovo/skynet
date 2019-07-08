@@ -77,7 +77,7 @@ _init_env(lua_State *L) {
 
 int sigign() {
 	struct sigaction sa;
-	sa.sa_handler = SIG_IGN;
+	sa.sa_handler = SIG_IGN; //SIG_IGN 忽略信号的处理程序
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGPIPE, &sa, 0);

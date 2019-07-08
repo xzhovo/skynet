@@ -37,7 +37,7 @@ static volatile int SIG = 0;
 
 static void
 handle_hup(int signal) {
-	if (signal == SIGHUP) {
+	if (signal == SIGHUP) { //挂起信号 kill -HUP 处理log文件切割
 		SIG = 1;
 	}
 }
@@ -56,7 +56,7 @@ static void
 wakeup(struct monitor *m, int busy) {
 	if (m->sleep >= m->count - busy) {
 		// signal sleep worker, "spurious wakeup" is harmless
-		pthread_cond_signal(&m->cond);
+		pthread_cond_signal(&m->cond); //发送一个信号给另外一个正在处于阻塞等待状态的线程,使其脱离阻塞状态,继续执行
 	}
 }
 
@@ -134,12 +134,13 @@ thread_timer(void *p) {
 		skynet_socket_updatetime();
 		CHECK_ABORT
 		wakeup(m,m->count-1);
-		usleep(2500);
-		if (SIG) {
+		usleep(2500); //0.0025秒
+		if (SIG) { //处理挂起信号
 			signal_hup();
 			SIG = 0;
 		}
 	}
+	// ABORT
 	// wakeup socket thread
 	skynet_socket_exit();
 	// wakeup all worker thread

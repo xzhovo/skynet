@@ -39,7 +39,7 @@ struct timer_event {
 
 struct timer_node {
 	struct timer_node *next;
-	uint32_t expire;
+	uint32_t expire; //超时时间
 };
 
 struct link_list {
@@ -103,7 +103,7 @@ add_node(struct timer *T,struct timer_node *node) {
 static void
 timer_add(struct timer *T,void *arg,size_t sz,int time) {
 	struct timer_node *node = (struct timer_node *)skynet_malloc(sizeof(*node)+sz);
-	memcpy(node+1,arg,sz);
+	memcpy(node+1,arg,sz); // node->next = arg
 
 	SPIN_LOCK(T);
 
@@ -199,13 +199,13 @@ timer_create_timer() {
 
 	int i,j;
 
-	for (i=0;i<TIME_NEAR;i++) {
-		link_clear(&r->near[i]);
+	for (i=0;i<TIME_NEAR;i++) { //256
+		link_clear(&r->near[i]); //255 link_list 切断
 	}
 
 	for (i=0;i<4;i++) {
 		for (j=0;j<TIME_LEVEL;j++) {
-			link_clear(&r->t[i][j]);
+			link_clear(&r->t[i][j]); //4*255 link_list
 		}
 	}
 
@@ -218,12 +218,12 @@ timer_create_timer() {
 
 int
 skynet_timeout(uint32_t handle, int time, int session) {
-	if (time <= 0) {
+	if (time <= 0) { //立即执行
 		struct skynet_message message;
-		message.source = 0;
+		message.source = 0; //没有服务来源，框架消息
 		message.session = session;
 		message.data = NULL;
-		message.sz = (size_t)PTYPE_RESPONSE << MESSAGE_TYPE_SHIFT;
+		message.sz = (size_t)PTYPE_RESPONSE << MESSAGE_TYPE_SHIFT; //total 8*size_t
 
 		if (skynet_context_push(handle, &message)) {
 			return -1;
@@ -232,7 +232,7 @@ skynet_timeout(uint32_t handle, int time, int session) {
 		struct timer_event event;
 		event.handle = handle;
 		event.session = session;
-		timer_add(TI, &event, sizeof(event), time);
+		timer_add(TI, &event, sizeof(event), time); //TI struct timer
 	}
 
 	return session;
@@ -243,10 +243,14 @@ static void
 systime(uint32_t *sec, uint32_t *cs) {
 #if !defined(__APPLE__) || defined(AVAILABLE_MAC_OS_X_VERSION_10_12_AND_LATER)
 	struct timespec ti;
+<<<<<<< HEAD
+	clock_gettime(CLOCK_REALTIME, &ti); //系统实时时间
+=======
 	clock_gettime(CLOCK_REALTIME, &ti); //系统时间
+>>>>>>> remotes/origin/master
 	*sec = (uint32_t)ti.tv_sec;
-	*cs = (uint32_t)(ti.tv_nsec / 10000000);
-#else
+	*cs = (uint32_t)(ti.tv_nsec / 10000000); //0.01秒
+#else //apple
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	*sec = tv.tv_sec;
@@ -254,6 +258,8 @@ systime(uint32_t *sec, uint32_t *cs) {
 #endif
 }
 
+//从系统启动这一刻起开始计时,不受系统时间被用户改变的影响
+//驱动是用这个，不受系统时间影响
 static uint64_t
 gettime() {
 	uint64_t t; //单位0.01s 10ms
@@ -278,7 +284,7 @@ skynet_updatetime(void) {
 		skynet_error(NULL, "time diff error: change from %lld to %lld", cp, TI->current_point);
 		TI->current_point = cp;
 	} else if (cp != TI->current_point) {
-		uint32_t diff = (uint32_t)(cp - TI->current_point);
+		uint32_t diff = (uint32_t)(cp - TI->current_point); //0.01秒==1
 		TI->current_point = cp;
 		TI->current += diff;
 		int i;
@@ -302,7 +308,7 @@ void
 skynet_timer_init(void) {
 	TI = timer_create_timer();
 	uint32_t current = 0;
-	systime(&TI->starttime, &current);
+	systime(&TI->starttime, &current); //starttime秒 current0.01秒
 	TI->current = current;
 	TI->current_point = gettime();
 }

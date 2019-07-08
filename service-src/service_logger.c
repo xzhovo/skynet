@@ -36,7 +36,7 @@ logger_cb(struct skynet_context * context, void *ud, int type, int session, uint
 	switch (type) {
 	case PTYPE_SYSTEM:
 		if (inst->filename) {
-			inst->handle = freopen(inst->filename, "a", inst->handle);
+			inst->handle = freopen(inst->filename, "a", inst->handle); //以追加内容方式重新打开log文件
 		}
 		break;
 	case PTYPE_TEXT:

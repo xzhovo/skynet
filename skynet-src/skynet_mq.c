@@ -68,8 +68,8 @@ skynet_globalmq_pop() {
 	SPIN_LOCK(q)
 	struct message_queue *mq = q->head;
 	if(mq) {
-		q->head = mq->next;
-		if(q->head == NULL) {
+		q->head = mq->next; //头指向下一个
+		if(q->head == NULL) { //没了
 			assert(mq == q->tail);
 			q->tail = NULL;
 		}
@@ -242,15 +242,16 @@ _drop_queue(struct message_queue *q, message_drop drop_func, void *ud) {
 	_release(q);
 }
 
+//释放q这条队列
 void 
 skynet_mq_release(struct message_queue *q, message_drop drop_func, void *ud) {
 	SPIN_LOCK(q)
 	
-	if (q->release) {
+	if (q->release) { //已经skynet_mq_mark_release过，表示对应上下文已经删除
 		SPIN_UNLOCK(q)
 		_drop_queue(q, drop_func, ud); //删除消息队列
 	} else {
-		skynet_globalmq_push(q); //传入全局消息队列去执行
+		skynet_globalmq_push(q); //传入全局消息队列去执行，以置空消息队列，上下文引用为0即可skynet_mq_mark_release
 		SPIN_UNLOCK(q)
 	}
 }

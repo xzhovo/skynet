@@ -1063,8 +1063,12 @@ clearcache() {
 
 static void
 init() {
-	SPIN_INIT(&CC);
 	CC.L = luaL_newstate();
+}
+
+LUALIB_API void
+luaL_initcodecache(void) {
+	SPIN_INIT(&CC);
 }
 
 static const void *
@@ -1103,7 +1107,7 @@ save(const char *key, const void * proto) {
     } else {
       lua_pop(L,2);
     }
-    
+
   SPIN_UNLOCK(&CC)
   return result;
 }

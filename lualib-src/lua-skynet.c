@@ -72,7 +72,7 @@ _cb(struct skynet_context * context, void * ud, int type, int session, uint32_t 
 	lua_pushinteger(L, session);
 	lua_pushinteger(L, source);
 
-	r = lua_pcall(L, 5, 0 , trace);
+	r = lua_pcall(L, 5, 0 , trace); //保护调用位置为1的fun，5参数，0返回
 
 	if (r == LUA_OK) {
 		return 0;
@@ -111,13 +111,13 @@ lcallback(lua_State *L) {
 	int forward = lua_toboolean(L, 2);
 	luaL_checktype(L,1,LUA_TFUNCTION);
 	lua_settop(L,1);
-	lua_rawsetp(L, LUA_REGISTRYINDEX, _cb);
+	lua_rawsetp(L, LUA_REGISTRYINDEX, _cb); //等价于 t[k] = v ， t 是指LUA_REGISTRYINDEX处的表， k 是指针 _cb 对应的轻量用户数据。 而 v 是栈顶的LUA_TFUNCTION。
 
-	lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD);
+	lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD); //把 t[LUA_RIDX_MAINTHREAD] 的值压栈， t 是指LUA_REGISTRYINDEX处的表
 	lua_State *gL = lua_tothread(L,-1);
 
 	if (forward) {
-		skynet_callback(context, gL, forward_cb);
+		skynet_callback(context, gL, forward_cb); //forward模式，不skynet_free
 	} else {
 		skynet_callback(context, gL, _cb);
 	}

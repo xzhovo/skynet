@@ -1,6 +1,7 @@
 local skynet = require "skynet"
 local memory = require "skynet.memory"
 
+--控制台打印整个进程的内存情况(jemalloc)
 memory.dumpinfo()
 --memory.dump()
 local info = memory.info()

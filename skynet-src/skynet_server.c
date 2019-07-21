@@ -264,7 +264,7 @@ static void
 dispatch_message(struct skynet_context *ctx, struct skynet_message *msg) {
 	assert(ctx->init);
 	CHECKCALLING_BEGIN(ctx)
-	pthread_setspecific(G_NODE.handle_key, (void *)(uintptr_t)(ctx->handle));
+	pthread_setspecific(G_NODE.handle_key, (void *)(uintptr_t)(ctx->handle)); //服务消息处理设置G_NODE.handle_key为ctx->handle，以区分hook为当前服务专属内存
 	int type = msg->sz >> MESSAGE_TYPE_SHIFT;
 	size_t sz = msg->sz & MESSAGE_TYPE_MASK;
 	if (ctx->logfile) {
@@ -280,7 +280,7 @@ dispatch_message(struct skynet_context *ctx, struct skynet_message *msg) {
 	} else {
 		reserve_msg = ctx->cb(ctx, ctx->cb_ud, type, msg->session, msg->source, msg->data, sz);
 	}
-	if (!reserve_msg) {
+	if (!reserve_msg) { //不是forward模式则skynet_free,forward模式在skynet.forward_type->lcallback设置
 		skynet_free(msg->data);
 	}
 	CHECKCALLING_END(ctx)

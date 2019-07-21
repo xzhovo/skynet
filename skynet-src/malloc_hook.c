@@ -46,7 +46,7 @@ static struct mem_data mem_stats[SLOT_SIZE];
 
 static ssize_t*
 get_allocated_field(uint32_t handle) {
-	int h = (int)(handle & (SLOT_SIZE - 1));
+	int h = (int)(handle & (SLOT_SIZE - 1)); //获得最后5位
 	struct mem_data *data = &mem_stats[h];
 	uint32_t old_handle = data->handle;
 	ssize_t old_alloc = data->allocated;
@@ -65,16 +65,18 @@ get_allocated_field(uint32_t handle) {
 	return &data->allocated;
 }
 
+//内存分配更新状态
 inline static void
 update_xmalloc_stat_alloc(uint32_t handle, size_t __n) {
-	ATOM_ADD(&_used_memory, __n);
-	ATOM_INC(&_memory_block);
-	ssize_t* allocated = get_allocated_field(handle);
+	ATOM_ADD(&_used_memory, __n); //总内存增加
+	ATOM_INC(&_memory_block); //块数增加
+	ssize_t* allocated = get_allocated_field(handle); //对应mem_stats已分配大小
 	if(allocated) {
-		ATOM_ADD(allocated, __n);
+		ATOM_ADD(allocated, __n); //增加
 	}
 }
 
+//内存释放更新状态
 inline static void
 update_xmalloc_stat_free(uint32_t handle, size_t __n) {
 	ATOM_SUB(&_used_memory, __n);
@@ -87,8 +89,8 @@ update_xmalloc_stat_free(uint32_t handle, size_t __n) {
 
 inline static void*
 fill_prefix(char* ptr) {
-	uint32_t handle = skynet_current_handle();
-	size_t size = je_malloc_usable_size(ptr);
+	uint32_t handle = skynet_current_handle(); //服务handle，或负的线程号
+	size_t size = je_malloc_usable_size(ptr); //可用空间
 	struct mem_cookie *p = (struct mem_cookie *)(ptr + size - sizeof(struct mem_cookie));
 	memcpy(&p->handle, &handle, sizeof(handle));
 #ifdef MEMORY_CHECK
@@ -127,6 +129,8 @@ static void malloc_oom(size_t size) {
 	abort();
 }
 
+
+//https://github.com/cloudwu/skynet/issues/827
 void
 memory_info_dump(void) {
 	je_malloc_stats_print(0,0,0);
@@ -185,7 +189,7 @@ mallctl_opt(const char* name, int* newval) {
 void *
 skynet_malloc(size_t size) {
 	void* ptr = je_malloc(size + PREFIX_SIZE);
-	if(!ptr) malloc_oom(size);
+	if(!ptr) malloc_oom(size); //超出
 	return fill_prefix(ptr);
 }
 
@@ -315,6 +319,11 @@ skynet_lalloc(void *ptr, size_t osize, size_t nsize) {
 	}
 }
 
+//列出所有C内存，由主线程内存(包括非独立的所有)；子线程内存(当前有socket)；单独区分开的C服务内存(其中同类第一个服务包括缓存的lua文件和消息内存，其他服务只有消息内存)
+//----
+//cmem 严格意义上讲是指该服务分配出来的内存，而服务退出并不意味着它分配出来的内存一定释放。
+//例如：发送出去的消息，需要等接收方释放。lua require 的 dll 可能不会随着 vm 调 dlclose 即时释放干净等等。此类情况还有一些，很难一一枚举。如果你感兴趣，可以在源码里多加一些 log 追踪。
+//ps. 除了 code cache 外 skynet 的 lua vm 还会保留头几千个字符串常量，超过一定量才释放额外字符串。
 int
 dump_mem_lua(lua_State *L) {
 	int i;

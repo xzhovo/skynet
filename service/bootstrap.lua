@@ -1,37 +1,35 @@
---é»˜è®¤çš„config.bootstrapï¼Œskynetè¿è¡Œçš„ç¬¬äºŒä¸ªæœåŠ¡(ç¬¬ä¸€æ˜¯logger)ã€‚é€šå¸¸é€šè¿‡è¿™ä¸ªæœåŠ¡æŠŠæ•´ä¸ªç³»ç»Ÿå¯åŠ¨èµ·æ¥
+--Ä¬ÈÏµÄconfig.bootstrap£¬skynetÔËĞĞµÄµÚ¶ş¸ö·şÎñ(µÚÒ»ÊÇlogger)¡£Í¨³£Í¨¹ıÕâ¸ö·şÎñ°ÑÕû¸öÏµÍ³Æô¶¯ÆğÀ´
 
 local skynet = require "skynet"
-local harbor = require "skynet.harbor" --èŠ‚ç‚¹
+local harbor = require "skynet.harbor" --½Úµã
 require "skynet.manager"	-- import skynet.launch, ...
 
 skynet.start(function()
-	local standalone = skynet.getenv "standalone" --æ˜¯å¦æ˜¯ä¸»èŠ‚ç‚¹
+	local standalone = skynet.getenv "standalone" --ÊÇ·ñÊÇÖ÷½Úµã
 
 	local launcher = assert(skynet.launch("snlua","launcher")) --service_snlua-launcher.lua
-	skynet.name(".launcher", launcher) --ç»‘å®šå¯åŠ¨å™¨
-
-	skynet.newservice "garbagecollect" --ssm
+	skynet.name(".launcher", launcher) --°ó¶¨Æô¶¯Æ÷
 
 	local harbor_id = tonumber(skynet.getenv "harbor" or 0)
-	if harbor_id == 0 then --å•èŠ‚ç‚¹
+	if harbor_id == 0 then --µ¥½Úµã
 		assert(standalone ==  nil)
 		standalone = true
 		skynet.setenv("standalone", "true")
 
 		local ok, slave = pcall(skynet.newservice, "cdummy")
 		if not ok then
-			skynet.abort() --ä¸­æ­¢
+			skynet.abort() --ÖĞÖ¹
 		end
-		skynet.name(".cslave", slave)  --cdummyä»£ç†slaveæ‹¦æˆªç»„ç½‘æ¶ˆæ¯
+		skynet.name(".cslave", slave)  --cdummy´úÀíslaveÀ¹½Ø×éÍøÏûÏ¢
 
 	else
-		if standalone then --ä¸»èŠ‚ç‚¹
-			if not pcall(skynet.newservice,"cmaster") then --è°ƒåº¦
+		if standalone then --Ö÷½Úµã
+			if not pcall(skynet.newservice,"cmaster") then --µ÷¶È
 				skynet.abort()
 			end
 		end
 
-		local ok, slave = pcall(skynet.newservice, "cslave") --ç»„ç½‘æ¶ˆæ¯è½¬å‘
+		local ok, slave = pcall(skynet.newservice, "cslave") --×éÍøÏûÏ¢×ª·¢
 		if not ok then
 			skynet.abort()
 		end
@@ -39,10 +37,10 @@ skynet.start(function()
 	end
 
 	if standalone then
-		local datacenter = skynet.newservice "datacenterd" --è·¨èŠ‚ç‚¹æ•°æ®å…±äº«
+		local datacenter = skynet.newservice "datacenterd" --¿ç½ÚµãÊı¾İ¹²Ïí
 		skynet.name("DATACENTER", datacenter)
 	end
-	skynet.newservice "service_mgr" --æœåŠ¡ç®¡ç†
+	skynet.newservice "service_mgr" --·şÎñ¹ÜÀí
 	pcall(skynet.newservice,skynet.getenv "start" or "main")
 	skynet.exit()
 end)

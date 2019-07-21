@@ -3,7 +3,6 @@
 #include "skynet_imp.h"
 #include "skynet_env.h"
 #include "skynet_server.h"
-#include "luashrtbl.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -77,7 +76,7 @@ _init_env(lua_State *L) {
 
 int sigign() {
 	struct sigaction sa;
-	sa.sa_handler = SIG_IGN;
+	sa.sa_handler = SIG_IGN; //SIG_IGN 忽略信号的处理程序
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGPIPE, &sa, 0);
@@ -126,13 +125,17 @@ main(int argc, char *argv[]) {
 		return 1;
 	}
 
-	luaS_initssm();
 	skynet_globalinit();
 	skynet_env_init();
 
 	sigign();
 
 	struct skynet_config config;
+
+#ifdef LUA_CACHELIB
+	// init the lock of code cache
+	luaL_initcodecache();
+#endif
 
 	struct lua_State *L = luaL_newstate();
 	luaL_openlibs(L);	// link lua lib
@@ -162,7 +165,6 @@ main(int argc, char *argv[]) {
 
 	skynet_start(&config);
 	skynet_globalexit();
-	luaS_exitssm();
 
 	return 0;
 }

@@ -37,7 +37,7 @@ static volatile int SIG = 0;
 
 static void
 handle_hup(int signal) {
-	if (signal == SIGHUP) {
+	if (signal == SIGHUP) { //挂起信号 kill -HUP 处理log文件切割
 		SIG = 1;
 	}
 }
@@ -56,7 +56,7 @@ static void
 wakeup(struct monitor *m, int busy) {
 	if (m->sleep >= m->count - busy) {
 		// signal sleep worker, "spurious wakeup" is harmless
-		pthread_cond_signal(&m->cond);
+		pthread_cond_signal(&m->cond); //发送一个信号给另外一个正在处于阻塞等待状态的线程,使其脱离阻塞状态,继续执行
 	}
 }
 
@@ -98,10 +98,10 @@ thread_monitor(void *p) {
 	skynet_initthread(THREAD_MONITOR);
 	for (;;) {
 		CHECK_ABORT
-		for (i=0;i<n;i++) {
+		for (i=0;i<n;i++) { //遍历所有监视器
 			skynet_monitor_check(m->m[i]);
 		}
-		for (i=0;i<5;i++) {
+		for (i=0;i<5;i++) { //5秒一检测
 			CHECK_ABORT
 			sleep(1);
 		}
@@ -134,12 +134,13 @@ thread_timer(void *p) {
 		skynet_socket_updatetime();
 		CHECK_ABORT
 		wakeup(m,m->count-1);
-		usleep(2500);
-		if (SIG) {
+		usleep(2500); //0.0025秒
+		if (SIG) { //处理挂起信号
 			signal_hup();
 			SIG = 0;
 		}
 	}
+	// ABORT
 	// wakeup socket thread
 	skynet_socket_exit();
 	// wakeup all worker thread
@@ -190,7 +191,7 @@ start(int thread) {
 
 	m->m = skynet_malloc(thread * sizeof(struct skynet_monitor *));
 	int i;
-	for (i=0;i<thread;i++) {
+	for (i=0;i<thread;i++) { //几线程对应几监视器
 		m->m[i] = skynet_monitor_new();
 	}
 	if (pthread_mutex_init(&m->mutex, NULL)) {
@@ -206,6 +207,10 @@ start(int thread) {
 	create_thread(&pid[1], thread_timer, m);
 	create_thread(&pid[2], thread_socket, m);
 
+	//权重值决定一条线程一次消费多少条次级消息队列里的消息，
+	//当权重值< 0，worker线程一次消费一条消息（从次级消息队列中pop一个消息）；
+	//当权重==0的时候，worker线程一次消费完次级消息队列里所有的消息；
+	//当权重>0时，假设次级消息队列的长度为mq_length，将mq_length转成二进制数值以后，向右移动weight（权重值）位次级消息队列的消息数。
 	static int weight[] = { 
 		-1, -1, -1, -1, 0, 0, 0, 0,
 		1, 1, 1, 1, 1, 1, 1, 1, 

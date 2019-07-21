@@ -214,7 +214,7 @@ delete_context(struct skynet_context *ctx) {
 		fclose(ctx->logfile);
 	}
 	skynet_module_instance_release(ctx->mod, ctx->instance);
-	skynet_mq_mark_release(ctx->queue); // q->release = 1;
+	skynet_mq_mark_release(ctx->queue); // q->release = 1;准备删除队列
 	CHECKCALLING_DESTROY(ctx)
 	skynet_free(ctx);
 	context_dec();
@@ -223,7 +223,7 @@ delete_context(struct skynet_context *ctx) {
 struct skynet_context * 
 skynet_context_release(struct skynet_context *ctx) {
 	if (ATOM_DEC(&ctx->ref) == 0) {
-		delete_context(ctx);
+		delete_context(ctx); //删除上下文
 		return NULL;
 	}
 	return ctx;
@@ -296,6 +296,7 @@ skynet_context_dispatchall(struct skynet_context * ctx) {
 	}
 }
 
+//sm 监视器; q 消息队列; weight 工作线程权重
 struct message_queue * 
 skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue *q, int weight) {
 	if (q == NULL) {
@@ -306,10 +307,10 @@ skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue 
 
 	uint32_t handle = skynet_mq_handle(q);
 
-	struct skynet_context * ctx = skynet_handle_grab(handle);
+	struct skynet_context * ctx = skynet_handle_grab(handle); //获取上下文(引用+1)
 	if (ctx == NULL) {
 		struct drop_t d = { handle };
-		skynet_mq_release(q, drop_message, &d);
+		skynet_mq_release(q, drop_message, &d); //释放没有上下文的消息队列 (如果ctx==NULL && release==0 这里将会enless loop
 		return skynet_globalmq_pop();
 	}
 
@@ -320,16 +321,16 @@ skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue 
 		if (skynet_mq_pop(q,&msg)) {
 			skynet_context_release(ctx); // 执行完消息推送，对应skynet_context引用-1
 			return skynet_globalmq_pop();
-		} else if (i==0 && weight >= 0) {
+		} else if (i==0 && weight >= 0) { // weight==0 所有，>0 位右移weight次
 			n = skynet_mq_length(q);
 			n >>= weight;
 		}
 		int overload = skynet_mq_overload(q);
-		if (overload) {
+		if (overload) { //消息过长 > 1024*n
 			skynet_error(ctx, "May overload, message queue length = %d", overload);
 		}
 
-		skynet_monitor_trigger(sm, msg.source , handle);
+		skynet_monitor_trigger(sm, msg.source , handle); //置有
 
 		if (ctx->cb == NULL) {
 			skynet_free(msg.data);
@@ -337,18 +338,18 @@ skynet_context_message_dispatch(struct skynet_monitor *sm, struct message_queue 
 			dispatch_message(ctx, &msg);
 		}
 
-		skynet_monitor_trigger(sm, 0,0);
+		skynet_monitor_trigger(sm, 0,0); //置无
 	}
 
 	assert(q == ctx->queue);
 	struct message_queue *nq = skynet_globalmq_pop();
-	if (nq) {
+	if (nq) { //有下一个，让位
 		// If global mq is not empty , push q back, and return next queue (nq)
 		// Else (global mq is empty or block, don't push q back, and return q again (for next dispatch)
 		skynet_globalmq_push(q);
 		q = nq;
 	} 
-	skynet_context_release(ctx);
+	skynet_context_release(ctx); //上下文引用-1
 
 	return q;
 }
@@ -400,9 +401,9 @@ struct command_func {
 static const char *
 cmd_timeout(struct skynet_context * context, const char * param) {
 	char * session_ptr = NULL;
-	int ti = strtol(param, &session_ptr, 10);
+	int ti = strtol(param, &session_ptr, 10); //string to int 10进制 不返回非法字符串
 	int session = skynet_context_newsession(context);
-	skynet_timeout(context->handle, ti, session);
+	skynet_timeout(context->handle, ti, session); //消息
 	sprintf(context->result, "%d", session);
 	return context->result;
 }
@@ -532,7 +533,7 @@ cmd_starttime(struct skynet_context * context, const char * param) {
 
 static const char *
 cmd_abort(struct skynet_context * context, const char * param) {
-	skynet_handle_retireall();
+	skynet_handle_retireall(); //退休吧
 	return NULL;
 }
 
@@ -813,7 +814,7 @@ skynet_globalinit(void) {
 	G_NODE.total = 0;
 	G_NODE.monitor_exit = 0;
 	G_NODE.init = 1;
-	if (pthread_key_create(&G_NODE.handle_key, NULL)) {
+	if (pthread_key_create(&G_NODE.handle_key, NULL)) { //线程的私有空间 pthread_key_t
 		fprintf(stderr, "pthread_key_create failed");
 		exit(1);
 	}
@@ -829,7 +830,7 @@ skynet_globalexit(void) {
 void
 skynet_initthread(int m) {
 	uintptr_t v = (uint32_t)(-m);
-	pthread_setspecific(G_NODE.handle_key, (void *)v);
+	pthread_setspecific(G_NODE.handle_key, (void *)v); //线程的私有空间
 }
 
 void

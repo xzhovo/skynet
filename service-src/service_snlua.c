@@ -121,7 +121,7 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 		return 1;
 	}
 	lua_settop(L,0);
-	if (lua_getfield(L, LUA_REGISTRYINDEX, "memlimit") == LUA_TNUMBER) { // skynet.memlimit设置最大内存 #define LUA_TNUMBER		3
+	if (lua_getfield(L, LUA_REGISTRYINDEX, "memlimit") == LUA_TNUMBER) { // skynet.memlimit设置最大内存
 		size_t limit = lua_tointeger(L, -1);
 		l->mem_limit = limit;
 		skynet_error(ctx, "Set memory limit to %.2f M", (float)limit / (1024 * 1024));
@@ -140,7 +140,7 @@ launch_cb(struct skynet_context * context, void *ud, int type, int session, uint
 	assert(type == 0 && session == 0);
 	struct snlua *l = ud;
 	skynet_callback(context, NULL, NULL); // 回调函数空
-	int err = init_cb(l, context, msg, sz); // 初始化
+	int err = init_cb(l, context, msg, sz); // 初始化回调函数，一般即skynet.start(或skynet.forward_type)时的skynet.dispatch_message
 	if (err) {
 		skynet_command(context, "EXIT", NULL);
 	}

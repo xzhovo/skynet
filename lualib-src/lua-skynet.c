@@ -66,6 +66,7 @@ _cb(struct skynet_context * context, void * ud, int type, int session, uint32_t 
 	}
 	lua_pushvalue(L,2);
 
+	//这里5个参数有顺序改变
 	lua_pushinteger(L, type);
 	lua_pushlightuserdata(L, (void *)msg);
 	lua_pushinteger(L,sz);
@@ -183,7 +184,7 @@ lintcommand(lua_State *L) {
 	const char * parm = NULL;
 	char tmp[64];	// for integer parm
 	if (lua_gettop(L) == 2) {
-		if (lua_isnumber(L, 2)) {
+		if (lua_isnumber(L, 2)) { // number转时间
 			int32_t n = (int32_t)luaL_checkinteger(L,2); //ti(0.01秒 
 			sprintf(tmp, "%d", n);
 			parm = tmp;
@@ -443,7 +444,7 @@ ltrace(lua_State *L) {
 		lua_Debug d;
 		int index = 0;
 		do {
-			if (!lua_getstack(co, level, &d))
+			if (!lua_getstack(co, level, &d)) //解释器的运行时栈的信息,第level层调用
 				break;
 			lua_getinfo(co, "Sl", &d);
 			level++;
@@ -452,7 +453,7 @@ ltrace(lua_State *L) {
 			if (d.currentline >= 0)
 				++index;
 		} while (index < MAX_LEVEL);
-		switch (index) {
+		switch (index) { //至多3层
 		case 1:
 			skynet_error(context, "<TRACE %s> %" PRId64 " %s : %s:%d", tag, get_time(), user, si[0].source, si[0].line);
 			break;

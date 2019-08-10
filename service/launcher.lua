@@ -1,3 +1,4 @@
+--服务启动器，管理所有服务的启动和关闭
 local skynet = require "skynet"
 local core = require "skynet.core"
 require "skynet.manager"	-- import manager apis

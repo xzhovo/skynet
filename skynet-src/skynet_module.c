@@ -10,16 +10,16 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define MAX_MODULE_TYPE 32
+#define MAX_MODULE_TYPE 32 //最多32C模块
 
 struct modules {
-	int count;
-	struct spinlock lock;
-	const char * path;
+	int count; //当前总数
+	struct spinlock lock; //自旋锁
+	const char * path; //
 	struct skynet_module m[MAX_MODULE_TYPE];
 };
 
-static struct modules * M = NULL;
+static struct modules * M = NULL; //C模块管理器
 
 static void *
 _try_open(struct modules *m, const char * name) {
@@ -51,7 +51,8 @@ _try_open(struct modules *m, const char * name) {
 			fprintf(stderr,"Invalid C service path\n");
 			exit(1);
 		}
-		dl = dlopen(tmp, RTLD_NOW | RTLD_GLOBAL);
+		//c so 路径+文件名 
+		dl = dlopen(tmp, RTLD_NOW | RTLD_GLOBAL); //功能是以指定模式打开指定的动态链接库文件，并返回一个句柄给dlsym()的调用进程
 		path = l;
 	}while(dl == NULL);
 
@@ -86,12 +87,12 @@ get_api(struct skynet_module *mod, const char *api_name) {
 	} else {
 		ptr = ptr + 1;
 	}
-	return dlsym(mod->module, ptr);
+	return dlsym(mod->module, ptr); //根据动态链接库操作句柄与符号，返回符号对应的地址(这里是函数
 }
 
 static int
 open_sym(struct skynet_module *mod) {
-	mod->create = get_api(mod, "_create");
+	mod->create = get_api(mod, "_create"); //获取函数并绑定 如：snlua_create
 	mod->init = get_api(mod, "_init");
 	mod->release = get_api(mod, "_release");
 	mod->signal = get_api(mod, "_signal");
@@ -114,7 +115,7 @@ skynet_module_query(const char * name) {
 		void * dl = _try_open(M,name);
 		if (dl) {
 			M->m[index].name = name;
-			M->m[index].module = dl;
+			M->m[index].module = dl; // get_api 中使用
 
 			if (open_sym(&M->m[index]) == 0) {
 				M->m[index].name = skynet_strdup(name);
@@ -174,7 +175,7 @@ void
 skynet_module_init(const char *path) {
 	struct modules *m = skynet_malloc(sizeof(*m));
 	m->count = 0;
-	m->path = skynet_strdup(path);
+	m->path = skynet_strdup(path); //拷贝路径赋值("./cservice/?.so")
 
 	SPIN_INIT(m)
 

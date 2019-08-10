@@ -985,9 +985,9 @@ static int
 start_socket(struct socket_server *ss, struct request_start *request, struct socket_message *result) {
 	int id = request->id;
 	result->id = id;
-	result->opaque = request->opaque;
-	result->ud = 0;
-	result->data = NULL;
+	result->opaque = request->opaque; //queue
+	result->ud = 0; //size
+	result->data = NULL; //msg
 	struct socket *s = &ss->slot[HASH_ID(id)];
 	if (s->type == SOCKET_TYPE_INVALID || s->id !=id) {
 		result->data = "invalid socket";
@@ -1003,13 +1003,13 @@ start_socket(struct socket_server *ss, struct request_start *request, struct soc
 		}
 		s->type = (s->type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN;
 		s->opaque = request->opaque;
-		result->data = "start";
-		return SOCKET_OPEN;
+		result->data = "start"; // listen和accept
+		return SOCKET_OPEN; //这个类型目前被忽略(同SKYNET_SOCKET_TYPE_CLOSE) lua-netpack.c:lfilter 
 	} else if (s->type == SOCKET_TYPE_CONNECTED) {
 		// todo: maybe we should send a message SOCKET_TRANSFER to s->opaque
 		s->opaque = request->opaque;
-		result->data = "transfer";
-		return SOCKET_OPEN;
+		result->data = "transfer"; //forward
+		return SOCKET_OPEN; //同上
 	}
 	// if s->type == SOCKET_TYPE_HALFCLOSE , SOCKET_CLOSE message will send later
 	return -1;

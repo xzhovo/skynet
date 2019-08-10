@@ -318,7 +318,7 @@ uint64_t
 skynet_thread_time(void) {
 #if  !defined(__APPLE__) || defined(AVAILABLE_MAC_OS_X_VERSION_10_12_AND_LATER)
 	struct timespec ti;
-	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ti);
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ti); //本线程到当前代码系统CPU花费的时间
 
 	return (uint64_t)ti.tv_sec * MICROSEC + (uint64_t)ti.tv_nsec / (NANOSEC / MICROSEC);
 #else

@@ -77,7 +77,7 @@ function CMD.forward(source, fd, client, address)
 	c.client = client or 0
 	c.agent = address or source
 	forwarding[c.agent] = c
-	gateserver.openclient(fd)
+	gateserver.openclient(fd) --lua-socket.c:lstart -> skynet_socket.c:skynet_socket_start -> socket_server.c:socket_server_start -> start_socket
 end
 
 function CMD.accept(source, fd)

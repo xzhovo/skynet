@@ -132,7 +132,7 @@ function gateserver.start(handler)
 		name = "socket",
 		id = skynet.PTYPE_SOCKET,	-- PTYPE_SOCKET = 6
 		unpack = function ( msg, sz )
-			return netpack.filter( queue, msg, sz)
+			return netpack.filter( queue, msg, sz) --lua-netpack.c:lfilter
 		end,
 		dispatch = function (_, _, q, type, ...)
 			queue = q

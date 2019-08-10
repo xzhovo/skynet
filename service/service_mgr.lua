@@ -8,6 +8,7 @@ local snax = require "skynet.snax"
 local cmd = {}
 local service = {}
 
+--发送请求
 local function request(name, func, ...)
 	local ok, handle = pcall(func, ...)
 	local s = service[name]
@@ -29,6 +30,7 @@ local function request(name, func, ...)
 	end
 end
 
+--合并不同协程的相同请求，只保留第一个
 local function waitfor(name , func, ...)
 	local s = service[name]
 	if type(s) == "number" then
@@ -78,16 +80,18 @@ local function read_name(service_name)
 	end
 end
 
+--主节点方法，注册
 function cmd.LAUNCH(service_name, subname, ...)
-	local realname = read_name(service_name)
+	local realname = read_name(service_name) --去@
 
 	if realname == "snaxd" then
 		return waitfor(service_name.."."..subname, snax.rawnewservice, subname, ...)
 	else
-		return waitfor(service_name, skynet.newservice, realname, subname, ...)
+		return waitfor(service_name, skynet.newservice, realname, subname, ...) --skynet.newservice
 	end
 end
 
+--主节点方法，获取地址
 function cmd.QUERY(service_name, subname)
 	local realname = read_name(service_name)
 
@@ -98,6 +102,7 @@ function cmd.QUERY(service_name, subname)
 	end
 end
 
+--全网消息信息
 local function list_service()
 	local result = {}
 	for k,v in pairs(service) do
@@ -106,7 +111,7 @@ local function list_service()
 		elseif type(v) == "table" then
 			local querying = {}
 			if v.launch then
-				local session = skynet.task(v.launch.co)
+				local session = skynet.task(v.launch.co) --第一个能生效的协程的会话信息
 				local launching_address = skynet.call(".launcher", "lua", "QUERY", session)
 				if launching_address then
 					table.insert(querying, "Init as " .. skynet.address(launching_address))
@@ -132,7 +137,7 @@ local function list_service()
 	return result
 end
 
-
+--本节点就是主节点
 local function register_global()
 	function cmd.GLAUNCH(name, ...)
 		local global_name = "@" .. name
@@ -171,6 +176,7 @@ local function register_global()
 	end
 end
 
+--非主节点方法
 local function register_local()
 	local function waitfor_remote(cmd, name, ...)
 		local global_name = "@" .. name
@@ -183,10 +189,12 @@ local function register_local()
 		return waitfor(local_name, skynet.call, "SERVICE", "lua", cmd, global_name, ...) --询问主节点
 	end
 
+	--全网注册服务
 	function cmd.GLAUNCH(...)
 		return waitfor_remote("LAUNCH", ...)
 	end
 
+	--全网获取服务地址
 	function cmd.GQUERY(...)
 		return waitfor_remote("QUERY", ...)
 	end

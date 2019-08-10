@@ -86,7 +86,7 @@ function skynet.filter(f ,start_func)
 	end)
 end
 
---给当前 skynet 进程设置一个全局的服务监控。
+--给当前 skynet 进程设置一个全局的服务退出时的监控。
 function skynet.monitor(service, query)
 	local monitor
 	if query then

@@ -20,7 +20,7 @@ static double
 get_time() {
 #if  !defined(__APPLE__)
 	struct timespec ti;
-	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ti);
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ti); //本线程到当前代码系统CPU花费的时间
 
 	int sec = ti.tv_sec & 0xffff;
 	int nsec = ti.tv_nsec;
@@ -113,30 +113,31 @@ lstop(lua_State *L) {
 	return 1;
 }
 
+//流程开始，记录开始时间
 static int
 timing_resume(lua_State *L) {
-	lua_pushvalue(L, -1);
-	lua_rawget(L, lua_upvalueindex(2));
-	if (lua_isnil(L, -1)) {		// check total time
+	lua_pushvalue(L, -1); //co副本2压栈
+	lua_rawget(L, lua_upvalueindex(2)); // check total time  (把t[k]的值压栈，t闭包第二个upvalue，k线程副本 push upvalue totaltime[coroutine]
+	if (lua_isnil(L, -1)) {		// check total time, 即checkprofile开关
 		lua_pop(L,2);	// pop from coroutine
 	} else {
-		lua_pop(L,1);
+		lua_pop(L,1); // total time出栈
 		double ti = get_time();
 #ifdef DEBUG_LOG
 		fprintf(stderr, "PROFILE [%p] resume %lf\n", lua_tothread(L, -1), ti);
 #endif
 		lua_pushnumber(L, ti);
-		lua_rawset(L, lua_upvalueindex(1));	// set start time
+		lua_rawset(L, lua_upvalueindex(1));	// set start time 压栈，供timing_yield difftime
 	}
 
-	lua_CFunction co_resume = lua_tocfunction(L, lua_upvalueindex(3));
+	lua_CFunction co_resume = lua_tocfunction(L, lua_upvalueindex(3)); // upvalue 3 c fun co_resume
 
 	return co_resume(L);
 }
 
 static int
 lresume(lua_State *L) {
-	lua_pushvalue(L,1);
+	lua_pushvalue(L,1); //co副本压栈
 	
 	return timing_resume(L);
 }
@@ -149,7 +150,7 @@ lresume_co(lua_State *L) {
 	return timing_resume(L);
 }
 
-//计时
+//流程结束，计算耗时
 static int
 timing_yield(lua_State *L) {
 #ifdef DEBUG_LOG
@@ -157,10 +158,10 @@ timing_yield(lua_State *L) {
 #endif
 	lua_pushvalue(L, -1); // 复制线程压栈
 	lua_rawget(L, lua_upvalueindex(2));	// check total time  (把t[k]的值压栈，t闭包第二个upvalue，k线程副本 push upvalue totaltime[coroutine]
-	if (lua_isnil(L, -1)) { // total time == nil
-		lua_pop(L,2); // 弹出线程副本1
+	if (lua_isnil(L, -1)) { // total time == nil, 即checkprofile开关
+		lua_pop(L,2); // 弹出线程2个副本
 	} else {
-		double ti = lua_tonumber(L, -1);
+		double ti = lua_tonumber(L, -1); //total time
 		lua_pop(L,1); // 弹出线程
 
 		lua_pushvalue(L, -1);	// push coroutine  (线程副本2
@@ -235,13 +236,14 @@ luaopen_skynet_profile(lua_State *L) {
 	lua_CFunction co_resume = lua_tocfunction(L, -1);
 	if (co_resume == NULL)
 		return luaL_error(L, "Can't get coroutine.resume");
-	lua_pop(L,1);
+	lua_pop(L,1); // pop coroutine.resume
 
-	lua_getfield(L, libtable, "resume");
-	lua_pushcfunction(L, co_resume);
-	lua_setupvalue(L, -2, 3);
-	lua_pop(L,1);
+	lua_getfield(L, libtable, "resume"); // l.resume压栈
+	lua_pushcfunction(L, co_resume); // co_resume压栈
+	lua_setupvalue(L, -2, 3); // l.resume上引值3设为co_resume，并出栈
+	lua_pop(L,1); // l.resume出栈
 
+	//同上
 	lua_getfield(L, libtable, "resume_co");
 	lua_pushcfunction(L, co_resume);
 	lua_setupvalue(L, -2, 3);

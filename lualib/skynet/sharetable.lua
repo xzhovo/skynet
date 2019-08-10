@@ -191,7 +191,7 @@ function sharetable.loadtable(filename, tbl)
 	skynet.call(sharetable.address, "lua", "loadtable", filename, skynet.pack(tbl))
 end
 
-
+--全部都 skynet.call "sharetable" 阻塞
 local RECORD = {}
 function sharetable.query(filename)
 	local newptr = skynet.call(sharetable.address, "lua", "query", filename)

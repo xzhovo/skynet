@@ -54,7 +54,7 @@ forward_message(int type, bool padding, struct socket_message * result) {
 	sm->type = type;
 	sm->id = result->id;
 	sm->ud = result->ud;
-	if (padding) {
+	if (padding) { //message.data = result->data
 		sm->buffer = NULL;
 		memcpy(sm+1, result->data, sz - sizeof(*sm));
 	} else {
@@ -75,13 +75,14 @@ forward_message(int type, bool padding, struct socket_message * result) {
 	}
 }
 
+//socket 线程工作
 int 
 skynet_socket_poll() {
 	struct socket_server *ss = SOCKET_SERVER;
 	assert(ss);
 	struct socket_message result;
 	int more = 1;
-	int type = socket_server_poll(ss, &result, &more);
+	int type = socket_server_poll(ss, &result, &more); //获得type
 	switch (type) {
 	case SOCKET_EXIT:
 		return 0;

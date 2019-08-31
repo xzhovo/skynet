@@ -38,10 +38,10 @@ function gateserver.start(handler)
 		maxclient = conf.maxclient or 1024
 		nodelay = conf.nodelay
 		skynet.error(string.format("Listen on %s:%d", address, port))
-		socket = socketdriver.listen(address, port)
+		socket = socketdriver.listen(address, port) -- socket slot id
 		socketdriver.start(socket)
 		if handler.open then
-			return handler.open(source, conf)
+			return handler.open(source, conf) -- gate open for wathdog = source and conf
 		end
 	end
 

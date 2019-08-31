@@ -79,5 +79,5 @@ skynet.start(function()
 		-- ignore all the command
 	end)
 
-	harbor_service = assert(skynet.launch("harbor", harbor_id, skynet.self()))
+	harbor_service = assert(skynet.launch("harbor", harbor_id, skynet.self())) --启动 service_harbor
 end)

@@ -338,7 +338,7 @@ function socket.block(id)
 end
 
 socket.write = assert(driver.send)
-socket.lwrite = assert(driver.lsend)
+socket.lwrite = assert(driver.lsend) --lsendlow 低优先级发送
 socket.header = assert(driver.header)
 
 function socket.invalid(id)

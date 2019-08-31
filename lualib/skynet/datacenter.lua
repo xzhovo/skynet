@@ -4,6 +4,7 @@ local datacenter = {}
 
 --都被call阻塞协程
 --"DATACENTER" == datacenterd.lua
+-- datecnter 就是在主节点上的一个服务，所有节点的服务都可以 call 它来共同维护一张 lua 表
 
 --从 key1.key2 读一个值。这个 api 至少需要一个参数，如果传入多个参数，则用来读出树的一个分支。
 function datacenter.get(...)

@@ -9,21 +9,21 @@ local database = {}
 local wait_queue = {}
 local mode = {}
 
-local function query(db, key, ...)
-	if db == nil then
-		return nil
+local function query(lvl, db, key, ...)
+	if db == nil then --自定义部分 lvl is for this
+		return nil, lvl
 	end
 	if key == nil then
 		return db
 	else
-		return query(db[key], ...)
+		return query(lvl+1, db[key], ...)
 	end
 end
 
 function command.QUERY(key, ...)
 	local d = database[key]
 	if d then
-		return query(d, ...)
+		return query(1, d, ...)
 	end
 end
 

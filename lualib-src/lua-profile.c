@@ -50,6 +50,7 @@ diff_time(double start) {
 	}
 }
 
+// 开始记录实际消息处理消耗时间，不包括挂起(调用 lstart 时协程已经被唤醒)
 static int
 lstart(lua_State *L) {
 	if (lua_gettop(L) != 0) {
@@ -68,7 +69,7 @@ lstart(lua_State *L) {
 	lua_rawset(L, lua_upvalueindex(2));
 
 	lua_pushvalue(L, 1);	// push coroutine
-	double ti = get_time();
+	double ti = get_time(); // 记录开始时刻
 #ifdef DEBUG_LOG
 	fprintf(stderr, "PROFILE [%p] start\n", L);
 #endif
@@ -78,6 +79,7 @@ lstart(lua_State *L) {
 	return 0;
 }
 
+// 结束，并返回不包括挂起的总消耗时间
 static int
 lstop(lua_State *L) {
 	if (lua_gettop(L) != 0) {
@@ -113,7 +115,7 @@ lstop(lua_State *L) {
 	return 1;
 }
 
-//流程开始，记录开始时间
+//唤醒，记录开始的时刻
 static int
 timing_resume(lua_State *L) {
 	lua_pushvalue(L, -1); //co副本2压栈
@@ -150,7 +152,7 @@ lresume_co(lua_State *L) {
 	return timing_resume(L);
 }
 
-//流程结束，计算耗时
+//被挂起，累加清醒时用时(当前时刻减开始时刻)
 static int
 timing_yield(lua_State *L) {
 #ifdef DEBUG_LOG

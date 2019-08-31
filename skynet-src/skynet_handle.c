@@ -18,6 +18,9 @@ struct handle_name {
 
 // skynet_context管理器结构
 struct handle_storage {
+	//因为我们访问一个服务的机会，远大于创建一个服务并写入列表的机会，因此这里用了读写锁，
+	//在通过handle获取context指针时，加了一个读取锁，这样当在读取的过程中，
+	//同时有新的服务创建，并且存在要扩充skynet_context list容量的风险( rehash 和长度改变)，因此不论如何，他都应当被阻塞住，直到所有的读取锁都释放掉。
     struct rwlock lock;            // 读写锁
     
     uint32_t harbor;               // harbor id
@@ -62,7 +65,7 @@ skynet_handle_register(struct skynet_context *ctx) {
 		struct skynet_context ** new_slot = skynet_malloc(s->slot_size * 2 * sizeof(struct skynet_context *));
 		memset(new_slot, 0, s->slot_size * 2 * sizeof(struct skynet_context *));
 		for (i=0;i<s->slot_size;i++) {
-			int hash = skynet_context_handle(s->slot[i]) & (s->slot_size * 2 - 1);
+			int hash = skynet_context_handle(s->slot[i]) & (s->slot_size * 2 - 1); //rehash
 			assert(new_slot[hash] == NULL);
 			new_slot[hash] = s->slot[i];
 		}
@@ -137,12 +140,13 @@ skynet_handle_retireall() {
 	}
 }
 
+// 通过 handle 找对应上下文
 struct skynet_context * 
 skynet_handle_grab(uint32_t handle) {
 	struct handle_storage *s = H;
 	struct skynet_context * result = NULL;
 
-	rwlock_rlock(&s->lock);
+	rwlock_rlock(&s->lock); //锁住，避免 skynet_context list 扩容风险
 
 	uint32_t hash = handle & (s->slot_size-1);
 	struct skynet_context * ctx = s->slot[hash];
@@ -156,6 +160,7 @@ skynet_handle_grab(uint32_t handle) {
 	return result;
 }
 
+// 通过别名找对应上下文的 ctx->handle 
 uint32_t 
 skynet_handle_findname(const char * name) {
 	struct handle_storage *s = H; //上下文管理器

@@ -109,7 +109,7 @@ end
 
 local coroutine_pool = setmetatable({}, { __mode = "kv" })
 
---创建协程
+--创建协程(创建完成后的初始状态是挂起)
 local function co_create(f)
 	local co = tremove(coroutine_pool) --先从协程池取
 	if co == nil then
@@ -140,14 +140,14 @@ local function co_create(f)
 				f = nil
 				coroutine_pool[#coroutine_pool+1] = co --挂起并加到协程池
 				-- recv new main function f
-				f = coroutine_yield "SUSPEND"
-				f(coroutine_yield())
+				f = coroutine_yield "SUSPEND" --挂起
+				f(coroutine_yield()) --先执行 coroutine_yield() , 挂起，完成从协程池取协程的创建, 待再次 coroutine_resume 传参唤醒，此时相当于执行f(...)
 			end
 		end)
 	else
 		-- pass the main function f to coroutine, and restore running thread
 		local running = running_thread
-		coroutine_resume(co, f) --唤醒执行f就行，重复if中流程
+		coroutine_resume(co, f) --唤醒执行f就行，重复if中while流程中的 f(coroutine_yield())
 		running_thread = running
 	end
 	return co
@@ -700,15 +700,15 @@ function skynet.harbor(addr)
 	return c.harbor(addr)
 end
 
--- skynet.error = c.error
-function skynet.error(str, ...)
-	-- t = {...}
-	-- for k,v in pairs(t) do
-	-- 	str = str .. ", " .. tostring(v)
-	-- end
-	local date=os.date("%Y-%m-%d %H:%M:%S: ") --这里改到service_logger.c中加可能更好,for对比下时效
-	c.error(date..str, ...)
-end
+skynet.error = c.error
+-- function skynet.error(str, ...)
+-- 	-- local t = {...}
+-- 	-- for i=1, #t do
+--  --        str = str .. ", " .. t[i]
+--  --    end
+-- 	local date=os.date("%H:%M:%S: ") --这里改到service_logger.c中加可能更好,for对比下时效
+-- 	c.error(date..str, ...)
+-- end
 
 -- log解释器的运行时栈的信息
 skynet.tracelog = c.trace

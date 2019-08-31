@@ -523,7 +523,7 @@ remote_send_handle(struct harbor *h, uint32_t source, uint32_t destination, int 
 		return 1;
 	}
 
-	struct slave * s = &h->s[harbor_id];
+	struct slave * s = &h->s[harbor_id]; // 通过目标服务的 ctx->handle 找到对应 slave
 	if (s->fd == 0 || s->status == STATUS_HANDSHAKE) {
 		if (s->status == STATUS_DOWN) {
 			// throw an error return to source
@@ -546,7 +546,7 @@ remote_send_handle(struct harbor *h, uint32_t source, uint32_t destination, int 
 		cookie.source = source;
 		cookie.destination = (destination & HANDLE_MASK) | ((uint32_t)type << HANDLE_REMOTE_SHIFT);
 		cookie.session = (uint32_t)session;
-		send_remote(context, s->fd, msg,sz,&cookie);
+		send_remote(context, s->fd, msg,sz,&cookie); //远程发送
 	}
 
 	return 0;
@@ -725,7 +725,7 @@ harbor_init(struct harbor *h, struct skynet_context *ctx, const char * args) {
 	}
 	h->id = harbor_id;
 	h->slave = slave;
-	skynet_callback(ctx, h, mainloop);
+	skynet_callback(ctx, h, mainloop); // horbor 回调函数就是 mainloop 处理内部和外部 socket 消息
 	skynet_harbor_start(ctx);
 
 	return 0;

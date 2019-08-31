@@ -23,19 +23,36 @@
 消息的派发机制是，工作线程，会从global_mq里pop一个次级消息队列来，然后从次级消息队列中，pop出一个消息，
 并传给context的callback函数，在完成驱动以后，再将次级消息队列push回global_mq中
 */
+/* 
+次级消息队列，实际上是一个数组，并且用两个int型数据，分别指向他的头部和尾部（head和tail），不论是head还是tail，
+当他们的值>=数组尺寸时，都会进行回绕（即从下标为0开始，比如值为数组的size时，会被重新赋值为0），在push操作后，
+head等于tail意味着队列已满（此时，队列会扩充两倍，并从头到尾重新赋值，此时head指向0，而tail为扩充前，数组的大小），
+在pop操作后，head等于tail意味着队列已经空了（后面他会从skynet全局消息队列中，被剔除掉）。
+head < tail 时
+    |pop->						|push->
+| head |      |      |      | tail |      |      | 
+(       skynet_message      )(      not use      )
+head > tail 时-------------------------------------
+                         |pop->	       |push->
+|      |      |      | head |      | tail |      | 
+(   skynet_message   )(   not use  )(skynet_message)
+head == tail 时------------------------------------
+push 时 跨容 cap = cap * 2
+pop 时 length == 0 ，队列空了，初始化过载保护值
+*/
 
 struct message_queue {
-	struct spinlock lock;
-	uint32_t handle;
-	int cap;
+	struct spinlock lock; //// 自旋锁，可能存在多个线程，向同一个队列写入的情况，加上自旋锁避免并发带来的风险
+	uint32_t handle; // 拥有此消息队列的服务的id
+	int cap; // 消息大小
 	int head;
 	int tail;
-	int release;
-	int in_global;
-	int overload;
-	int overload_threshold;
-	struct skynet_message *queue;
-	struct message_queue *next;
+	int release; // 是否能释放消息
+	int in_global; // 是否在全局消息队列中，0表示不是，1表示是
+	int overload; //过载消息数
+	int overload_threshold; //超这个值过载保护
+	struct skynet_message *queue; //消息数组
+	struct message_queue *next; // 下一个次级消息队列的指针
 };
 
 struct global_queue {
@@ -93,9 +110,9 @@ skynet_mq_create(uint32_t handle) {
 	// If the service init success, skynet_context_new will call skynet_mq_push to push it to global queue.
 	q->in_global = MQ_IN_GLOBAL;
 	q->release = 0;
-	q->overload = 0;
-	q->overload_threshold = MQ_OVERLOAD;
-	q->queue = skynet_malloc(sizeof(struct skynet_message) * q->cap);
+	q->overload = 0; //当前过载消息数
+	q->overload_threshold = MQ_OVERLOAD; //消息数超过这么多将保护
+	q->queue = skynet_malloc(sizeof(struct skynet_message) * q->cap); //默认64条消息
 	q->next = NULL;
 
 	return q;
@@ -130,6 +147,7 @@ skynet_mq_length(struct message_queue *q) {
 	return tail + cap - head;
 }
 
+//过载，消息太多了
 int
 skynet_mq_overload(struct message_queue *q) {
 	if (q->overload) {
@@ -156,10 +174,10 @@ skynet_mq_pop(struct message_queue *q, struct skynet_message *message) {
 			q->head = head = 0;
 		}
 		int length = tail - head;
-		if (length < 0) {
-			length += cap;
+		if (length < 0) { // head 在后，tail 在前
+			length += cap; // (-length) 表示 tail 和 head 间的那段，未使用的消息的数量
 		}
-		while (length > q->overload_threshold) {
+		while (length > q->overload_threshold) { //过载保护了，超1024*n了
 			q->overload = length;
 			q->overload_threshold *= 2;
 		}
@@ -195,15 +213,15 @@ expand_queue(struct message_queue *q) {
 void 
 skynet_mq_push(struct message_queue *q, struct skynet_message *message) {
 	assert(message);
-	SPIN_LOCK(q)
+	SPIN_LOCK(q) //自旋，循环尝试插入
 
 	q->queue[q->tail] = *message;
 	if (++ q->tail >= q->cap) {
-		q->tail = 0;
+		q->tail = 0; //回绕
 	}
 
 	if (q->head == q->tail) {
-		expand_queue(q);
+		expand_queue(q); //扩容
 	}
 
 	if (q->in_global == 0) {

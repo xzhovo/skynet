@@ -286,7 +286,7 @@ send_message(lua_State *L, int source, int idx_type) {
 		}
 		// send to invalid address
 		// todo: maybe throw an error would be better
-		return 0;
+		return 0; // 报错时 0 个返回值，只能拿到 nil 
 	}
 	lua_pushinteger(L,session);
 	return 1;

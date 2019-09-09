@@ -45,7 +45,7 @@ skynet接收客户端消息流程
 	首先会对数据进行分包和粘包处理，当收齐所有字节以后，又会向agent服务转发（向agent的次级消息队列push消息），最后agent会一个一个消费这些从客户端上传的请求。
 
 服务端向客户端发送数据流程 
-	agent服务向客户端发送消息时，直接通过管道，将数据包从worker线程发送往socket线程，socket线程收到后，会将数据包存入对应socket的write buffer中，最后再向客户端推送。
+	agent服务向客户端发送消息时，尝试直接发送，一般没有多服务 write 都能成功；当有多服务 write 且上一份没发完时通过管道，将数据包从worker线程发送往socket线程，socket线程收到后，会将数据包存入对应socket的write buffer中，最后再向客户端推送。
  */
 
 void 

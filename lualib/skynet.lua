@@ -563,6 +563,7 @@ function skynet.dispatch_unknown_response(unknown)
 end
 
 --它等价于 skynet.timeout(0, function() func(...) end) 但是比 timeout 高效一点。因为它并不需要向框架注册一个定时器。
+--func 里面一定要有挂起，也就是阻塞调用，不然毫无意义，因为 fork_queue 是在消息处理函数挂起后 while true 遍历唤醒处理，挂起时继续循环
 function skynet.fork(func,...)
 	local n = select("#", ...) --...中的参数个数
 	local co
@@ -649,7 +650,7 @@ function skynet.dispatch_message(...)
 		if co == nil then
 			break
 		end
-		local fork_succ, fork_err = pcall(suspend,co,coroutine_resume(co)) --唤醒继续处理，谢谢你交出CPU
+		local fork_succ, fork_err = pcall(suspend,co,coroutine_resume(co)) --唤醒继续处理，谢谢你交出CPU，挂起第一个阻塞，也就是说 fork 的 func 不一定走完
 		if not fork_succ then
 			if succ then
 				succ = false

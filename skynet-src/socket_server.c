@@ -1436,8 +1436,8 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 			}
 		}
 		if (ss->event_index == ss->event_n) { //刚开始或者没事件了
-			ss->event_n = sp_wait(ss->event_fd, ss->ev, MAX_EVENT);
-			ss->checkctrl = 1; // 读到，有其他线程向 socket 线程发送管道消息
+			ss->event_n = sp_wait(ss->event_fd, ss->ev, MAX_EVENT); //等待注册的事件发生，返回事件的数目，并将触发的事件写入 ss->event_fd 中
+			ss->checkctrl = 1; // 有其他线程向 socket 线程注册的事件被触发了
 			if (more) {
 				*more = 0;
 			}
@@ -1582,7 +1582,7 @@ can_direct_write(struct socket *s, int id) {
 	return s->id == id && nomore_sending_data(s) && s->type == SOCKET_TYPE_CONNECTED && s->udpconnecting == 0;
 }
 
-// worker 线程消息驱动 lua 服务 send -> lua-socket.c:lsend -> skynet_socket.c:skynet_socket_send
+// worker 线程消息驱动 lua socket.write -> lua-socket.c:lsend -> skynet_socket.c:skynet_socket_send
 // worker 线程消息驱动 service_gate:_cb PTYPE_CLIENT
 // worker 线程消息驱动 servece_horbor:send_remote
 // 尝试直接 socket 直接写入，不能直接写入则走 sp_write (linux epoll; bsd kqueue)
@@ -1600,7 +1600,10 @@ socket_server_send(struct socket_server *ss, int id, const void * buffer, int sz
 	struct socket_lock l;
 	socket_lock_init(s, &l); //新建一个自旋锁
 
-	if (can_direct_write(s,id) && socket_trylock(&l)) { //是 外部 socket 连接且可以直写
+	if (can_direct_write(s,id) && socket_trylock(&l)) { //是 外部 socket 连接且可以直写，通常不在多个服务中 socket.write 只会走这里
+														//疑问：多服务 socket.write 能提高效率吗？可能不能直接发送，走管道进 socket 线程排队 
+														//优点：减少不必要消息，减少资源浪费
+														//缺点：多线程同时处理多服务时可能产生无法直接发送的情况，会增加 socket 线程压力；逻辑复杂化
 		// may be we can send directly, double check
 		if (can_direct_write(s,id)) {
 			// send directly

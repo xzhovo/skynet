@@ -29,16 +29,18 @@
 head等于tail意味着队列已满（此时，队列会扩充两倍，并从头到尾重新赋值，此时head指向0，而tail为扩充前，数组的大小），
 在pop操作后，head等于tail意味着队列已经空了（后面他会从skynet全局消息队列中，被剔除掉）。
 head < tail 时
-    |pop->						|push->
+    |pop->                      |push->
 | head |      |      |      | tail |      |      | 
 (       skynet_message      )(      not use      )
 head > tail 时-------------------------------------
-                         |pop->	       |push->
-|      |      |      | head |      | tail |      | 
+                         |push->       |pop->
+|      |      |      | tail |      | head |      | 
 (   skynet_message   )(   not use  )(skynet_message)
 head == tail 时------------------------------------
 push 时 跨容 cap = cap * 2
 pop 时 length == 0 ，队列空了，初始化过载保护值
+
+tail 追上 head，说明满了，扩容；head 追上 tail，说明空了，over 不用再处理了
 */
 
 struct message_queue {

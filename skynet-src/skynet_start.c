@@ -18,6 +18,27 @@
 #include <string.h>
 #include <signal.h>
 
+/*
+有4种线程：
+monitor 监视线程：5秒检查一次是否有消息卡住
+
+timer 定时器线程：每2.5毫秒工作一次(由于 skynet 最小时间单位为10毫秒，不过这决定了无法用1毫秒，一般更小粒度只能设为5毫秒)，
+并试图唤醒一个睡眠的工作线程；
+处理 skynet.timeout, skynet.sleep 等函数时间轮添加节点，在32位数据中
+32位是分第1~8,9~14,15~20,21~26,27~32位的，5个级别，分别对应 t[3][0],t[0],t[1],t[2],t[3] ,相差0~2.55s以内存 near ,大于 2.55s 存单位刻度向量 t
+
+socket 网络线程：epoll(linux) 处理网络消息，不停工作
+主要是外部连接的流量接收和组网消息的收发，其中外部流量的发送一般在 worker 工作线程中直接发送了，不管 socket 线程的事，
+除非多服务 socket.write 可能并发，锁住走 epoll 管道排队发送；epoll 用默认模式，注册事件，不停通知，wait 后处理所有触发的事件
+epoll 是由一个红黑树事件节点表和一个双向链表事件触发通知表组成
+
+worker 工作线程：处理服务队列消息，不停工作，直到全局队列没有服务消息队列了(没消息了)，睡眠，等被 timer 线程唤醒
+由初始分配的线程的权重决定处理多少消息，< 4 时由于数量太少，为了保证没有服务被饿死，
+每次只处理一个服务消息队列中的一条消息，> 4 < 8 时处理全部消息，有线程保证不饿死了，我们就是来榨干 CPU 的，
+> 8 时处理的消息数递减，保证流畅？
+建议核少时 worker 线程数量 == 核数，核多时 核数*2-3 ?
+ */
+
 struct monitor {
 	int count;
 	struct skynet_monitor ** m;
@@ -54,9 +75,9 @@ create_thread(pthread_t *thread, void *(*start_routine) (void *), void *arg) {
 
 static void
 wakeup(struct monitor *m, int busy) {
-	if (m->sleep >= m->count - busy) {
+	if (m->sleep >= m->count - busy) { // 睡眠的工作线程数大于等于 1 吗，是即唤醒一个工作线程(仅一个)
 		// signal sleep worker, "spurious wakeup" is harmless
-		pthread_cond_signal(&m->cond); //发送一个信号给另外一个正在处于阻塞等待状态的线程,使其脱离阻塞状态,继续执行
+		pthread_cond_signal(&m->cond); //发送一个信号给另外一个正在处于阻塞等待状态的线程,使其脱离阻塞状态,继续执行( thread_worker pthread_cond_wait 处)
 	}
 }
 
@@ -64,15 +85,15 @@ static void *
 thread_socket(void *p) {
 	struct monitor * m = p;
 	skynet_initthread(THREAD_SOCKET);
-	for (;;) {
+	for (;;) { //不停工作
 		int r = skynet_socket_poll();
-		if (r==0)
+		if (r==0) //结束
 			break;
-		if (r<0) {
+		if (r<0) { //报错或更多没处理
 			CHECK_ABORT
 			continue;
 		}
-		wakeup(m,0);
+		wakeup(m,0); // check 是不是全睡着了，是则唤醒一个
 	}
 	return NULL;
 }
@@ -98,10 +119,10 @@ thread_monitor(void *p) {
 	skynet_initthread(THREAD_MONITOR);
 	for (;;) {
 		CHECK_ABORT
-		for (i=0;i<n;i++) { //遍历所有监视器
+		for (i=0;i<n;i++) { //遍历所有监视器(每隔5秒一次)
 			skynet_monitor_check(m->m[i]);
 		}
-		for (i=0;i<5;i++) { //5秒一检测
+		for (i=0;i<5;i++) { //暂停5秒，每秒 check 结束
 			CHECK_ABORT
 			sleep(1);
 		}

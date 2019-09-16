@@ -1009,12 +1009,12 @@ start_socket(struct socket_server *ss, struct request_start *request, struct soc
 		s->type = (s->type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN;
 		s->opaque = request->opaque;
 		result->data = "start"; // listen 和 accept
-		return SOCKET_OPEN; //这个类型目前被忽略(同SKYNET_SOCKET_TYPE_CLOSE) lua-netpack.c:lfilter 
+		return SOCKET_OPEN; //这个类型目前被忽略(同SKYNET_SOCKET_TYPE_CONNECT) lua-netpack.c:lfilter 
 	} else if (s->type == SOCKET_TYPE_CONNECTED) {
 		// todo: maybe we should send a message SOCKET_TRANSFER to s->opaque
 		s->opaque = request->opaque;
 		result->data = "transfer"; //forward
-		return SOCKET_OPEN; //这个类型目前被忽略(同SKYNET_SOCKET_TYPE_CLOSE) lua-netpack.c:lfilter 
+		return SOCKET_OPEN; //这个类型目前被忽略(同SKYNET_SOCKET_TYPE_CONNECT) lua-netpack.c:lfilter 
 	}
 	// if s->type == SOCKET_TYPE_HALFCLOSE , SOCKET_CLOSE message will send later
 	return -1;

@@ -8,6 +8,7 @@ local pcall = pcall
 local table = table
 local tremove = table.remove
 local tinsert = table.insert
+local traceback = debug.traceback
 
 local profile = require "skynet.profile" --lua-profile
 
@@ -43,7 +44,7 @@ local skynet = {
 -- code cache
 skynet.cache = require "skynet.codecache" --service_snlua.c:codecache
 
---æ³¨å†Œè‡ªå®šä¹‰æ¶ˆæ¯ç±»å‹
+--×¢²á×Ô¶¨ÒåÏûÏ¢ÀàĞÍ
 function skynet.register_protocol(class)
 	local name = class.name
 	local id = class.id
@@ -53,18 +54,18 @@ function skynet.register_protocol(class)
 	proto[id] = class
 end
 
-local session_id_coroutine = {} --key:session;value:åç¨‹
-local session_coroutine_id = {} --key:ä¼šè¯;value:åç¨‹
-local session_coroutine_address = {} --key:åç¨‹;value:æºæœåŠ¡åœ°å€
-local session_coroutine_tracetag = {} --key:åç¨‹;value:æ˜¯å¦trace
-local unresponse = {} --å»¶è¿Ÿå›å¤è¡¨ key:resfun;value:è¯·æ±‚æ–¹æœåŠ¡æº
+local session_id_coroutine = {} --key:session;value:Ğ­³Ì
+local session_coroutine_id = {} --key:»á»°;value:Ğ­³Ì
+local session_coroutine_address = {} --key:Ğ­³Ì;value:Ô´·şÎñµØÖ·
+local session_coroutine_tracetag = {} --key:Ğ­³Ì;value:ÊÇ·ñtrace
+local unresponse = {} --ÑÓ³Ù»Ø¸´±í key:resfun;value:ÇëÇó·½·şÎñÔ´
 
-local wakeup_queue = {} --å¯å”¤é†’çš„åç¨‹å¯¹å’
-local sleep_session = {} --ç¡çœ çš„ä¼šè¯ keyåç¨‹valueä¼šè¯
+local wakeup_queue = {} --¿É»½ĞÑµÄĞ­³Ì¶ÔÀİ
+local sleep_session = {} --Ë¯ÃßµÄ»á»° keyĞ­³Ìvalue»á»°
 
-local watching_session = {} --callé˜»å¡åç›‘è§†çš„sessionå¯¹ç›®çš„æœåŠ¡åœ°å€ï¼Œ0æ—¶éå†æ‰¾æœåŠ¡
-local error_queue = {} --é”™è¯¯é˜Ÿåˆ—
-local fork_queue = {} --skynet.forkç”¨æ¥äº¤å‡ºCPUçš„åç¨‹é˜Ÿåˆ— == timeout(0, fun)
+local watching_session = {} --call×èÈûºó¼àÊÓµÄsession¶ÔÄ¿µÄ·şÎñµØÖ·£¬0Ê±±éÀúÕÒ·şÎñ
+local error_queue = {} --´íÎó¶ÓÁĞ
+local fork_queue = {} --skynet.forkÓÃÀ´½»³öCPUµÄĞ­³Ì¶ÓÁĞ == timeout(0, fun)
 
 -- suspend is function
 local suspend
@@ -72,17 +73,17 @@ local suspend
 
 ----- monitor exit
 
---æ¯æ¬¡åç¨‹æŒ‚èµ·å°±å¤„ç†1æ¬¡é”™è¯¯é˜Ÿåˆ—
+--Ã¿´ÎĞ­³Ì¹ÒÆğ¾Í´¦Àí1´Î´íÎó¶ÓÁĞ
 local function dispatch_error_queue()
 	local session = tremove(error_queue,1)
 	if session then
 		local co = session_id_coroutine[session]
 		session_id_coroutine[session] = nil
-		return suspend(co, coroutine_resume(co, false)) --å”¤é†’å¯¹åº”åç¨‹ä¼ false
+		return suspend(co, coroutine_resume(co, false)) --»½ĞÑ¶ÔÓ¦Ğ­³Ì´«false
 	end
 end
 
---skynet.PTYPE_ERROR æ¶ˆæ¯
+--skynet.PTYPE_ERROR ÏûÏ¢
 local function _error_dispatch(error_session, error_source)
 	skynet.ignoreret()	-- don't return for error
 	if error_session == 0 then
@@ -109,12 +110,12 @@ end
 
 local coroutine_pool = setmetatable({}, { __mode = "kv" })
 
---åˆ›å»ºåç¨‹(åˆ›å»ºå®Œæˆåçš„åˆå§‹çŠ¶æ€æ˜¯æŒ‚èµ·)
+--´´½¨Ğ­³Ì(´´½¨Íê³ÉºóµÄ³õÊ¼×´Ì¬ÊÇ¹ÒÆğ)
 local function co_create(f)
-	local co = tremove(coroutine_pool) --å…ˆä»åç¨‹æ± å–
+	local co = tremove(coroutine_pool) --ÏÈ´ÓĞ­³Ì³ØÈ¡
 	if co == nil then
-		co = coroutine_create(function(...) --æ–°åˆ›
-			f(...) --æ‰§è¡Œä¸€éå°±é€€ä¼‘
+		co = coroutine_create(function(...) --ĞÂ´´
+			f(...) --Ö´ĞĞÒ»±é¾ÍÍËĞİ
 			while true do
 				local session = session_coroutine_id[co]
 				if session and session ~= 0 then
@@ -132,37 +133,37 @@ local function co_create(f)
 				end
 				local address = session_coroutine_address[co]
 				if address then
-					session_coroutine_id[co] = nil --æ¸…ç©ºåç¨‹session
-					session_coroutine_address[co] = nil --æ¸…ç©ºåç¨‹è®°å½•çš„æºæœåŠ¡
+					session_coroutine_id[co] = nil --Çå¿ÕĞ­³Ìsession
+					session_coroutine_address[co] = nil --Çå¿ÕĞ­³Ì¼ÇÂ¼µÄÔ´·şÎñ
 				end
 
 				-- recycle co into pool
 				f = nil
-				coroutine_pool[#coroutine_pool+1] = co --æŒ‚èµ·å¹¶åŠ åˆ°åç¨‹æ± 
+				coroutine_pool[#coroutine_pool+1] = co --¹ÒÆğ²¢¼Óµ½Ğ­³Ì³Ø
 				-- recv new main function f
-				f = coroutine_yield "SUSPEND" --æŒ‚èµ·
-				f(coroutine_yield()) --å…ˆæ‰§è¡Œ coroutine_yield() , æŒ‚èµ·ï¼Œå®Œæˆä»åç¨‹æ± å–åç¨‹çš„åˆ›å»º, å¾…å†æ¬¡ coroutine_resume ä¼ å‚å”¤é†’ï¼Œæ­¤æ—¶ç›¸å½“äºæ‰§è¡Œf(...)
+				f = coroutine_yield "SUSPEND" --¹ÒÆğ
+				f(coroutine_yield()) --ÏÈÖ´ĞĞ coroutine_yield() , ¹ÒÆğ£¬Íê³É´ÓĞ­³Ì³ØÈ¡Ğ­³ÌµÄ´´½¨, ´ıÔÙ´Î coroutine_resume ´«²Î»½ĞÑ£¬´ËÊ±Ïàµ±ÓÚÖ´ĞĞf(...)
 			end
 		end)
 	else
 		-- pass the main function f to coroutine, and restore running thread
 		local running = running_thread
-		coroutine_resume(co, f) --å”¤é†’æ‰§è¡Œfå°±è¡Œï¼Œé‡å¤ifä¸­whileæµç¨‹ä¸­çš„ f(coroutine_yield())
+		coroutine_resume(co, f) --»½ĞÑÖ´ĞĞf¾ÍĞĞ£¬ÖØ¸´ifÖĞwhileÁ÷³ÌÖĞµÄ f(coroutine_yield())
 		running_thread = running
 	end
 	return co
 end
 
-local function dispatch_wakeup() --å‰è¾ˆæŒ‚èµ·,å”¤é†’åè¾ˆ
-	local token = tremove(wakeup_queue,1) --è¿”å›ç¬¬ä¸€ä¸ªwakeupçš„åç¨‹token
+local function dispatch_wakeup() --Ç°±²¹ÒÆğ,»½ĞÑºó±²
+	local token = tremove(wakeup_queue,1) --·µ»ØµÚÒ»¸öwakeupµÄĞ­³Ìtoken
 	if token then
-		local session = sleep_session[token] --è·å–åç¨‹session
+		local session = sleep_session[token] --»ñÈ¡Ğ­³Ìsession
 		if session then
-			local co = session_id_coroutine[session] --è·å–åç¨‹??token~=co??
-			local tag = session_coroutine_tracetag[co] --åŠ å…¥æ‰“å°æ ˆ
-			if tag then c.trace(tag, "resume") end --æ‰“å°å‘½åresume
-			session_id_coroutine[session] = "BREAK" --å°†çŠ¶æ€ç½®ä¸ºæ­£åœ¨å”¤é†’
-			return suspend(co, coroutine_resume(co, false, "BREAK")) --cå”¤é†’oåç¨‹,æŒ‚èµ·æˆ–è€…é€€å‡ºè°ƒç”¨suspendåˆ‡æ¢åˆ°å…¶ä»–wakeupåç¨‹æˆ–é€€å‡ºæœåŠ¡
+			local co = session_id_coroutine[session] --»ñÈ¡Ğ­³Ì??token~=co??
+			local tag = session_coroutine_tracetag[co] --¼ÓÈë´òÓ¡Õ»
+			if tag then c.trace(tag, "resume") end --´òÓ¡ÃüÃûresume
+			session_id_coroutine[session] = "BREAK" --½«×´Ì¬ÖÃÎªÕıÔÚ»½ĞÑ
+			return suspend(co, coroutine_resume(co, false, "BREAK")) --c»½ĞÑoĞ­³Ì,¹ÒÆğ»òÕßÍË³öµ÷ÓÃsuspendÇĞ»»µ½ÆäËûwakeupĞ­³Ì»òÍË³ö·şÎñ
 		end
 	end
 end
@@ -187,8 +188,8 @@ function suspend(co, result, command)
 		error(debug.traceback(co,tostring(command)))
 	end
 	if command == "SUSPEND" then
-		dispatch_wakeup() --æŒ‚å½“å‰ï¼Œå”¤é†’ä¸‹ä¸€ä¸ª
-		dispatch_error_queue() --æœ‰é”™è¯¯å°±å¤„ç†å¯¹åº”åç¨‹
+		dispatch_wakeup() --¹Òµ±Ç°£¬»½ĞÑÏÂÒ»¸ö
+		dispatch_error_queue() --ÓĞ´íÎó¾Í´¦Àí¶ÔÓ¦Ğ­³Ì
 	elseif command == "QUIT" then
 		-- service exit
 		return
@@ -203,7 +204,7 @@ function suspend(co, result, command)
 	end
 end
 
---è®©æ¡†æ¶åœ¨ ti ä¸ªå•ä½æ—¶é—´åï¼Œè°ƒç”¨ func è¿™ä¸ªå‡½æ•°
+--ÈÃ¿ò¼ÜÔÚ ti ¸öµ¥Î»Ê±¼äºó£¬µ÷ÓÃ func Õâ¸öº¯Êı
 function skynet.timeout(ti, func)
 	local session = c.intcommand("TIMEOUT",ti)
 	assert(session)
@@ -213,23 +214,23 @@ function skynet.timeout(ti, func)
 	return co	-- for debug
 end
 
---ä¼‘çœ æŒ‚èµ·
+--ĞİÃß¹ÒÆğ
 local function suspend_sleep(session, token)
-	local tag = session_coroutine_tracetag[running_thread] --è¯¥åç¨‹æ˜¯å¦éœ€è¦æ‰“å°æ ˆ
-	if tag then c.trace(tag, "sleep", 2) end --æ‰“å°äº‹ä»¶å‘½åsleep, è‡³å¤š2å±‚å‡½æ•°
-	session_id_coroutine[session] = running_thread --session to åç¨‹
+	local tag = session_coroutine_tracetag[running_thread] --¸ÃĞ­³ÌÊÇ·ñĞèÒª´òÓ¡Õ»
+	if tag then c.trace(tag, "sleep", 2) end --´òÓ¡ÊÂ¼şÃüÃûsleep, ÖÁ¶à2²ãº¯Êı
+	session_id_coroutine[session] = running_thread --session to Ğ­³Ì
 	assert(sleep_session[token] == nil, "token duplicative")
-	sleep_session[token] = session --è¯¥åç¨‹æ ‡è®°ä¸Šsessionå¹¶åŠ å…¥sleep_session
+	sleep_session[token] = session --¸ÃĞ­³Ì±ê¼ÇÉÏsession²¢¼ÓÈësleep_session
 
-	return coroutine_yield "SUSPEND" --æŒ‚èµ·,è¿”å›"SUSPEND"ç»™resume,æœ€ç»ˆåœ¨suspendå”¤é†’å…¶ä»–waitåç¨‹
+	return coroutine_yield "SUSPEND" --¹ÒÆğ,·µ»Ø"SUSPEND"¸øresume,×îÖÕÔÚsuspend»½ĞÑÆäËûwaitĞ­³Ì
 end
 
--- å°†å½“å‰ coroutine æŒ‚èµ· ti ä¸ªå•ä½æ—¶é—´ã€‚
+-- ½«µ±Ç° coroutine ¹ÒÆğ ti ¸öµ¥Î»Ê±¼ä¡£
 function skynet.sleep(ti, token)
 	local session = c.intcommand("TIMEOUT",ti)
 	assert(session)
 	token = token or coroutine.running()
-	local succ, ret = suspend_sleep(session, token) --dispatch_wakeupå”¤é†’è¿”å›false, "BREAK"
+	local succ, ret = suspend_sleep(session, token) --dispatch_wakeup»½ĞÑ·µ»Øfalse, "BREAK"
 	sleep_session[token] = nil
 	if succ then
 		return
@@ -241,16 +242,16 @@ function skynet.sleep(ti, token)
 	end
 end
 
---äº¤å‡ºå½“å‰æœåŠ¡å¯¹ CPU çš„æ§åˆ¶æƒã€‚é€šå¸¸åœ¨ä½ æƒ³åšå¤§é‡çš„æ“ä½œï¼Œåˆæ²¡æœ‰æœºä¼šè°ƒç”¨é˜»å¡ API æ—¶ï¼Œå¯ä»¥é€‰æ‹©è°ƒç”¨ yield è®©ç³»ç»Ÿè·‘çš„æ›´å¹³æ»‘ã€‚
+--½»³öµ±Ç°·şÎñ¶Ô CPU µÄ¿ØÖÆÈ¨¡£Í¨³£ÔÚÄãÏë×ö´óÁ¿µÄ²Ù×÷£¬ÓÖÃ»ÓĞ»ú»áµ÷ÓÃ×èÈû API Ê±£¬¿ÉÒÔÑ¡Ôñµ÷ÓÃ yield ÈÃÏµÍ³ÅÜµÄ¸üÆ½»¬¡£
 function skynet.yield()
 	return skynet.sleep(0)
 end
 
---æŠŠå½“å‰ coroutine æŒ‚èµ·ï¼Œä¹‹åç”± skynet.wakeup å”¤é†’
-function skynet.wait(token) --è®©åç¨‹æŒ‚èµ·ç­‰å¾… tokené»˜è®¤ä¸ºcoroutine.running()
+--°Ñµ±Ç° coroutine ¹ÒÆğ£¬Ö®ºóÓÉ skynet.wakeup »½ĞÑ
+function skynet.wait(token) --ÈÃĞ­³Ì¹ÒÆğµÈ´ı tokenÄ¬ÈÏÎªcoroutine.running()
 	local session = c.genid()
 	token = token or coroutine.running()
-	local ret, msg = suspend_sleep(session, token) --å‡½æ•°æš‚æ—¶ç»ˆæ­¢(æœªè¿”å›),å†æ¬¡resumeæ—¶ç»§ç»­å¹¶è¿”å›
+	local ret, msg = suspend_sleep(session, token) --º¯ÊıÔİÊ±ÖÕÖ¹(Î´·µ»Ø),ÔÙ´ÎresumeÊ±¼ÌĞø²¢·µ»Ø
 	sleep_session[token] = nil
 	session_id_coroutine[session] = nil
 end
@@ -259,7 +260,7 @@ function skynet.self()
 	return c.addresscommand "REG"
 end
 
---è·å–æœ¬èŠ‚ç‚¹æœåŠ¡å
+--»ñÈ¡±¾½Úµã·şÎñÃû
 function skynet.localname(name)
 	return c.addresscommand("QUERY", name)
 end
@@ -291,7 +292,7 @@ end
 
 local starttime
 
---skynetå¯åŠ¨æ—¶é—´
+--skynetÆô¶¯Ê±¼ä
 function skynet.starttime()
 	if not starttime then
 		starttime = c.intcommand("STARTTIME")
@@ -299,22 +300,22 @@ function skynet.starttime()
 	return starttime
 end
 
---skynetå½“å‰æ—¶é—´(ä¸æ˜¯ç³»ç»Ÿæ—¶é—´)
+--skynetµ±Ç°Ê±¼ä(²»ÊÇÏµÍ³Ê±¼ä)
 function skynet.time()
 	return skynet.now()/100 + (starttime or skynet.starttime())
 end
 
---skynetå¯åŠ¨æ—¶é—´(ç§’)
+--skynetÆô¶¯Ê±¼ä(Ãë)
 function skynet.nowSeconed()
 	return math.floor(skynet.now()/100)
 end
 
---skynetå½“å‰æ—¶é—´(ç§’)
+--skynetµ±Ç°Ê±¼ä(Ãë)
 function skynet.timeSeconed()
 	return math.floor(skynet.now()/100 + (starttime or skynet.starttime()))
 end
 
---é€€å‡ºæœåŠ¡
+--ÍË³ö·şÎñ
 function skynet.exit()
 	fork_queue = {}	-- no fork coroutine can be execute after skynet.exit
 	skynet.send(".launcher","lua","REMOVE",skynet.self(), false)
@@ -325,7 +326,7 @@ function skynet.exit()
 			c.send(address, skynet.PTYPE_ERROR, session, "")
 		end
 	end
-	for resp in pairs(unresponse) do --å»¶è¿Ÿå›åº”çš„ç›´æ¥å›åº”false
+	for resp in pairs(unresponse) do --ÑÓ³Ù»ØÓ¦µÄÖ±½Ó»ØÓ¦false
 		resp(false)
 	end
 	-- report the sources I call but haven't return
@@ -341,12 +342,12 @@ function skynet.exit()
 	coroutine_yield "QUIT"
 end
 
---è·å–ç¯å¢ƒå˜é‡
+--»ñÈ¡»·¾³±äÁ¿
 function skynet.getenv(key)
 	return (c.command("GETENV",key))
 end
 
---è®¾ç½®ç¯å¢ƒå˜é‡
+--ÉèÖÃ»·¾³±äÁ¿
 function skynet.setenv(key, value)
 	assert(c.command("GETENV",key) == nil, "Can't setenv exist key : " .. key)
 	c.command("SETENV",key .. " " ..value)
@@ -357,7 +358,7 @@ function skynet.send(addr, typename, ...)
 	return c.send(addr, p.id, 0 , p.pack(...))
 end
 
---å’Œ skynet.send ç±»ä¼¼ã€‚ä½†å‘é€æ—¶ä¸ç»è¿‡ pack æ‰“åŒ…æµç¨‹
+--ºÍ skynet.send ÀàËÆ¡£µ«·¢ËÍÊ±²»¾­¹ı pack ´ò°üÁ÷³Ì
 function skynet.rawsend(addr, typename, msg, sz)
 	local p = proto[typename]
 	return c.send(addr, p.id, 0 , msg, sz)
@@ -375,7 +376,7 @@ skynet.unpack = assert(c.unpack) --lua-seri.c:luaseri_unpack
 skynet.tostring = assert(c.tostring)
 skynet.trash = assert(c.trash)
 
---æŒ‚èµ· call åç¨‹ï¼Œç­‰å›åº”
+--¹ÒÆğ call Ğ­³Ì£¬µÈ»ØÓ¦
 local function yield_call(service, session)
 	watching_session[session] = service --watching_session for error
 	session_id_coroutine[session] = running_thread
@@ -396,8 +397,8 @@ function skynet.call(addr, typename, ...)
 		error("call addr is nil, " .. protoName)
 	end
 	local tag = session_coroutine_tracetag[running_thread] --string.format(":%08x-%d",skynet.self(), traceid)
-	if tag then --æ¶ˆæ¯è·Ÿè¸ªæ—¥å¿—
-		c.trace(tag, "call", 2) --2å±‚
+	if tag then --ÏûÏ¢¸ú×ÙÈÕÖ¾
+		c.trace(tag, "call", 2) --2²ã
 		c.send(addr, skynet.PTYPE_TRACE, 0, tag)
 	end
 
@@ -409,7 +410,7 @@ function skynet.call(addr, typename, ...)
 	return p.unpack(yield_call(addr, session))
 end
 
---å’Œ skynet.call ç±»ä¼¼ã€‚ä½†å‘é€æ—¶ä¸ç»è¿‡ pack æ‰“åŒ…æµç¨‹ï¼Œæ”¶åˆ°å›åº”åï¼Œä¹Ÿä¸èµ° unpack æµç¨‹ã€‚
+--ºÍ skynet.call ÀàËÆ¡£µ«·¢ËÍÊ±²»¾­¹ı pack ´ò°üÁ÷³Ì£¬ÊÕµ½»ØÓ¦ºó£¬Ò²²»×ß unpack Á÷³Ì¡£
 function skynet.rawcall(addr, typename, msg, sz)
 	local tag = session_coroutine_tracetag[running_thread]
 	if tag then
@@ -421,7 +422,7 @@ function skynet.rawcall(addr, typename, msg, sz)
 	return yield_call(addr, session)
 end
 
---éœ€è¦traceçš„call
+--ĞèÒªtraceµÄcall
 function skynet.tracecall(tag, addr, typename, msg, sz)
 	c.trace(tag, "tracecall begin")
 	c.send(addr, skynet.PTYPE_TRACE, 0, tag)
@@ -432,7 +433,7 @@ function skynet.tracecall(tag, addr, typename, msg, sz)
 	return msg, sz
 end
 
---å›åº”
+--»ØÓ¦
 function skynet.ret(msg, sz)
 	msg = msg or ""
 	local tag = session_coroutine_tracetag[running_thread]
@@ -459,20 +460,20 @@ function skynet.ret(msg, sz)
 	return false
 end
 
---è·å–å½“å‰åç¨‹ä¼šè¯ä¿¡æ¯å’ŒæºæœåŠ¡åœ°å€
+--»ñÈ¡µ±Ç°Ğ­³Ì»á»°ĞÅÏ¢ºÍÔ´·şÎñµØÖ·
 function skynet.context()
 	local co_session = session_coroutine_id[running_thread]
 	local co_address = session_coroutine_address[running_thread]
 	return co_session, co_address
 end
 
---ä¸å›å¤(æ¯”å¦‚æœåŠ¡ç«¯é€šçŸ¥å®¢æˆ·ç«¯)
+--²»»Ø¸´(±ÈÈç·şÎñ¶ËÍ¨Öª¿Í»§¶Ë)
 function skynet.ignoreret()
 	-- We use session for other uses
 	session_coroutine_id[running_thread] = nil
 end
 
---è¿”å›çš„é—­åŒ…å¯ç”¨äºå»¶è¿Ÿå›åº”
+--·µ»ØµÄ±Õ°ü¿ÉÓÃÓÚÑÓ³Ù»ØÓ¦
 function skynet.response(pack)
 	pack = pack or skynet.pack
 
@@ -515,12 +516,12 @@ function skynet.response(pack)
 	return response
 end
 
---æ‰“åŒ…æ¶ˆæ¯å›å¤
+--´ò°üÏûÏ¢»Ø¸´
 function skynet.retpack(...)
 	return skynet.ret(skynet.pack(...))
 end
 
---å”¤é†’sleepçš„åç¨‹
+--»½ĞÑsleepµÄĞ­³Ì
 function skynet.wakeup(token)
 	if sleep_session[token] then
 		tinsert(wakeup_queue, token)
@@ -528,7 +529,7 @@ function skynet.wakeup(token)
 	end
 end
 
---æ³¨å†Œå¯¹åº”ç±»å‹çš„å›è°ƒå‡½æ•°
+--×¢²á¶ÔÓ¦ÀàĞÍµÄ»Øµ÷º¯Êı
 function skynet.dispatch(typename, func)
 	local p = proto[typename]
 	if func then
@@ -562,16 +563,16 @@ function skynet.dispatch_unknown_response(unknown)
 	return prev
 end
 
---å®ƒç­‰ä»·äº skynet.timeout(0, function() func(...) end) ä½†æ˜¯æ¯” timeout é«˜æ•ˆä¸€ç‚¹ã€‚å› ä¸ºå®ƒå¹¶ä¸éœ€è¦å‘æ¡†æ¶æ³¨å†Œä¸€ä¸ªå®šæ—¶å™¨ã€‚
---func é‡Œé¢ä¸€å®šè¦æœ‰æŒ‚èµ·ï¼Œä¹Ÿå°±æ˜¯é˜»å¡è°ƒç”¨ï¼Œä¸ç„¶æ¯«æ— æ„ä¹‰ï¼Œå› ä¸º fork_queue æ˜¯åœ¨æ¶ˆæ¯å¤„ç†å‡½æ•°æŒ‚èµ·å while true éå†å”¤é†’å¤„ç†ï¼ŒæŒ‚èµ·æ—¶ç»§ç»­å¾ªç¯
+--ËüµÈ¼ÛÓÚ skynet.timeout(0, function() func(...) end) µ«ÊÇ±È timeout ¸ßĞ§Ò»µã¡£ÒòÎªËü²¢²»ĞèÒªÏò¿ò¼Ü×¢²áÒ»¸ö¶¨Ê±Æ÷¡£
+--func ÀïÃæÒ»¶¨ÒªÓĞ¹ÒÆğ£¬Ò²¾ÍÊÇ×èÈûµ÷ÓÃ£¬²»È»ºÁÎŞÒâÒå£¬ÒòÎª fork_queue ÊÇÔÚÏûÏ¢´¦Àíº¯Êı¹ÒÆğºó while true ±éÀú»½ĞÑ´¦Àí£¬¹ÒÆğÊ±¼ÌĞøÑ­»·
 function skynet.fork(func,...)
-	local n = select("#", ...) --...ä¸­çš„å‚æ•°ä¸ªæ•°
+	local n = select("#", ...) --...ÖĞµÄ²ÎÊı¸öÊı
 	local co
 	if n == 0 then
 		co = co_create(func)
 	else
 		local args = { ... }
-		co = co_create(function() func(table.unpack(args,1,n)) end) --å¸¦å‚
+		co = co_create(function() func(table.unpack(args,1,n)) end) --´ø²Î
 	end
 	tinsert(fork_queue, co)
 	return co
@@ -579,12 +580,12 @@ end
 
 local trace_source = {}
 
---çœŸæ­£æ¶ˆæ¯å¤„ç†(è¿™æ‰æ˜¯æœåŠ¡è¿è½¬æ—¶çš„mainå‡½æ•°)
+--ÕæÕıÏûÏ¢´¦Àí(Õâ²ÅÊÇ·şÎñÔË×ªÊ±µÄmainº¯Êı)
 local function raw_dispatch_message(prototype, msg, sz, session, source)
 	-- skynet.PTYPE_RESPONSE = 1, read skynet.h
 	if prototype == 1 then
 		local co = session_id_coroutine[session]
-		if co == "BREAK" then --å·²ç»å”¤é†’äº†ä½†session_id_coroutine[session]è¿˜å­˜åœ¨
+		if co == "BREAK" then --ÒÑ¾­»½ĞÑÁËµ«session_id_coroutine[session]»¹´æÔÚ
 			session_id_coroutine[session] = nil
 		elseif co == nil then
 			unknown_response(session, source, msg, sz)
@@ -592,15 +593,15 @@ local function raw_dispatch_message(prototype, msg, sz, session, source)
 			local tag = session_coroutine_tracetag[co]
 			if tag then c.trace(tag, "resume") end
 			session_id_coroutine[session] = nil
-			suspend(co, coroutine_resume(co, true, msg, sz)) --åˆ‡æ¢coä¸ºå½“å‰å·¥ä½œçš„åç¨‹ï¼Œå”¤é†’yield_callæŒ‚èµ·çš„åœ°æ–¹ï¼Œå°†true, msg, szä¼ å…¥ï¼Œå¤„ç†callçš„ret
+			suspend(co, coroutine_resume(co, true, msg, sz)) --ÇĞ»»coÎªµ±Ç°¹¤×÷µÄĞ­³Ì£¬»½ĞÑyield_call¹ÒÆğµÄµØ·½£¬½«true, msg, sz´«Èë£¬´¦ÀícallµÄret
 		end
 	else
 		local p = proto[prototype]
 		if p == nil then
-			if prototype == skynet.PTYPE_TRACE then --traceæ¶ˆæ¯ï¼Œè¯·æ±‚æ–¹æŒ‡å®šéœ€è¦traceï¼Œåœ¨callå‰ä¼šå‘è¿™ä¸ª(sendæ— éœ€
+			if prototype == skynet.PTYPE_TRACE then --traceÏûÏ¢£¬ÇëÇó·½Ö¸¶¨ĞèÒªtrace£¬ÔÚcallÇ°»á·¢Õâ¸ö(sendÎŞĞè
 				-- trace next request
-				trace_source[source] = c.tostring(msg,sz) --è®¾ç½®è¦traceçš„è¯·æ±‚æ–¹çš„traceå¼€å…³
-			elseif session ~= 0 then --æ˜¯ä¼šè¯ä½†æ˜¯éæ³•åè®®
+				trace_source[source] = c.tostring(msg,sz) --ÉèÖÃÒªtraceµÄÇëÇó·½µÄtrace¿ª¹Ø
+			elseif session ~= 0 then --ÊÇ»á»°µ«ÊÇ·Ç·¨Ğ­Òé
 				c.send(source, skynet.PTYPE_ERROR, session, "")
 			else
 				unknown_request(session, source, msg, sz, prototype)
@@ -608,23 +609,23 @@ local function raw_dispatch_message(prototype, msg, sz, session, source)
 			return
 		end
 
-		local f = p.dispatch --æœåŠ¡skynet.dispatchè®¾ç½®çš„å¯¹åº”ç±»å‹çš„function
+		local f = p.dispatch --·şÎñskynet.dispatchÉèÖÃµÄ¶ÔÓ¦ÀàĞÍµÄfunction
 		if f then
 			local co = co_create(f)
-			session_coroutine_id[co] = session --è®°å½•ä¼šè¯å·
-			session_coroutine_address[co] = source --è®°å½•è¯·æ±‚æ–¹æœåŠ¡æº
-			local traceflag = p.trace --é»˜è®¤nil skynet.traceprotoè®¾ç½®traceåè®®
-			if traceflag == false then --å…³é—­traceï¼Œè¿™é‡Œä¼˜å…ˆçº§é«˜äºtrace_sourceï¼Œæ‰€ä»¥å°±ç®—è¯·æ±‚æ–¹è¦traceä¹Ÿä¸è¡Œ
+			session_coroutine_id[co] = session --¼ÇÂ¼»á»°ºÅ
+			session_coroutine_address[co] = source --¼ÇÂ¼ÇëÇó·½·şÎñÔ´
+			local traceflag = p.trace --Ä¬ÈÏnil skynet.traceprotoÉèÖÃtraceĞ­Òé
+			if traceflag == false then --¹Ø±Õtrace£¬ÕâÀïÓÅÏÈ¼¶¸ßÓÚtrace_source£¬ËùÒÔ¾ÍËãÇëÇó·½ÒªtraceÒ²²»ĞĞ
 				-- force off
 				trace_source[source] = nil
 				session_coroutine_tracetag[co] = false
 			else
 				local tag = trace_source[source]
-				if tag then --è¯·æ±‚æ–¹äº‹å…ˆé€šçŸ¥äº†tag==true
+				if tag then --ÇëÇó·½ÊÂÏÈÍ¨ÖªÁËtag==true
 					trace_source[source] = nil
 					c.trace(tag, "request")
 					session_coroutine_tracetag[co] = tag
-				elseif traceflag then --è‡ªå·±è¦tag
+				elseif traceflag then --×Ô¼ºÒªtag
 					-- set running_thread for trace
 					running_thread = co
 					skynet.trace()
@@ -634,7 +635,7 @@ local function raw_dispatch_message(prototype, msg, sz, session, source)
 		else
 			trace_source[source] = nil
 			if session ~= 0 then
-				c.send(source, skynet.PTYPE_ERROR, session, "") --é€šçŸ¥è¯·æ±‚æ–¹ä¸èƒ½å¤„ç†
+				c.send(source, skynet.PTYPE_ERROR, session, "") --Í¨ÖªÇëÇó·½²»ÄÜ´¦Àí
 			else
 				unknown_request(session, source, msg, sz, proto[prototype].name)
 			end
@@ -642,15 +643,15 @@ local function raw_dispatch_message(prototype, msg, sz, session, source)
 	end
 end
 
---å¤„ç†æ¶ˆæ¯(è¿™æ˜¯ä¸€ä¸ªå›è°ƒå‡½æ•°ï¼Œç”¨äºåœ¨è¢«å…¶ä»–æœåŠ¡è°ƒç”¨ï¼Œæ¶ˆæ¯é©±åŠ¨ skynet_server.c:dispatch_message -> lua-skynet.c:_cb -> here)
+--´¦ÀíÏûÏ¢(ÕâÊÇÒ»¸ö»Øµ÷º¯Êı£¬ÓÃÓÚÔÚ±»ÆäËû·şÎñµ÷ÓÃ£¬ÏûÏ¢Çı¶¯ skynet_server.c:dispatch_message -> lua-skynet.c:_cb -> here)
 function skynet.dispatch_message(...)
 	local succ, err = pcall(raw_dispatch_message,...)
-	while true do --æœ‰æ¶ˆæ¯å°±å¤„ç†skynet.forkçš„fork_queueæ‰€æœ‰
+	while true do --ÓĞÏûÏ¢¾Í´¦Àískynet.forkµÄfork_queueËùÓĞ
 		local co = tremove(fork_queue,1)
 		if co == nil then
 			break
 		end
-		local fork_succ, fork_err = pcall(suspend,co,coroutine_resume(co)) --å”¤é†’ç»§ç»­å¤„ç†ï¼Œè°¢è°¢ä½ äº¤å‡ºCPUï¼ŒæŒ‚èµ·ç¬¬ä¸€ä¸ªé˜»å¡ï¼Œä¹Ÿå°±æ˜¯è¯´ fork çš„ func ä¸ä¸€å®šèµ°å®Œ
+		local fork_succ, fork_err = pcall(suspend,co,coroutine_resume(co)) --»½ĞÑ¼ÌĞø´¦Àí£¬Ğ»Ğ»Äã½»³öCPU£¬¹ÒÆğµÚÒ»¸ö×èÈû£¬Ò²¾ÍÊÇËµ fork µÄ func ²»Ò»¶¨×ßÍê
 		if not fork_succ then
 			if succ then
 				succ = false
@@ -661,15 +662,15 @@ function skynet.dispatch_message(...)
 		end
 	end
 	assert(succ, tostring(err))
-	collectgarbage("step") --å†…å­˜ç´§å¼ çš„ç¯å¢ƒå¢åŠ gcçš„ä¸»åŠ¨æ€§
+	collectgarbage("step") --ÄÚ´æ½ôÕÅµÄ»·¾³Ôö¼ÓgcµÄÖ÷¶¯ĞÔ
 end
 
---å¯åŠ¨å¯é‡å¤æœåŠ¡
+--Æô¶¯¿ÉÖØ¸´·şÎñ
 function skynet.newservice(name, ...)
 	return skynet.call(".launcher", "lua" , "LAUNCH", "snlua", name, ...)
 end
 
---å¯åŠ¨ä¸é‡å¤çš„æœåŠ¡, global==true->å…¨ç½‘;å¦åˆ™åå­—
+--Æô¶¯²»ÖØ¸´µÄ·şÎñ, global==true->È«Íø;·ñÔòÃû×Ö
 function skynet.uniqueservice(global, ...)
 	if global == true then
 		return assert(skynet.call(".service", "lua", "GLAUNCH", ...)) -- .service == service_mgr
@@ -678,7 +679,7 @@ function skynet.uniqueservice(global, ...)
 	end
 end
 
---è·å–æœåŠ¡å(å¯å…¨ç½‘)
+--»ñÈ¡·şÎñÃû(¿ÉÈ«Íø)
 function skynet.queryservice(global, ...)
 	if global == true then
 		return assert(skynet.call(".service", "lua", "GQUERY", ...))
@@ -687,7 +688,7 @@ function skynet.queryservice(global, ...)
 	end
 end
 
---æ ¼å¼åŒ–æœåŠ¡åœ°å€
+--¸ñÊ½»¯·şÎñµØÖ·
 function skynet.address(addr)
 	if type(addr) == "number" then
 		return string.format(":%08x",addr)
@@ -696,7 +697,7 @@ function skynet.address(addr)
 	end
 end
 
---è·å¾—æœåŠ¡æ‰€å±çš„èŠ‚ç‚¹
+--»ñµÃ·şÎñËùÊôµÄ½Úµã
 function skynet.harbor(addr)
 	return c.harbor(addr)
 end
@@ -707,14 +708,14 @@ skynet.error = c.error
 -- 	-- for i=1, #t do
 --  --        str = str .. ", " .. t[i]
 --  --    end
--- 	local date=os.date("%H:%M:%S: ") --è¿™é‡Œæ”¹åˆ°service_logger.cä¸­åŠ å¯èƒ½æ›´å¥½,forå¯¹æ¯”ä¸‹æ—¶æ•ˆ
+-- 	local date=os.date("%H:%M:%S: ") --ÕâÀï¸Äµ½service_logger.cÖĞ¼Ó¿ÉÄÜ¸üºÃ,for¶Ô±ÈÏÂÊ±Ğ§
 -- 	c.error(date..str, ...)
 -- end
 
--- logè§£é‡Šå™¨çš„è¿è¡Œæ—¶æ ˆçš„ä¿¡æ¯
+-- log½âÊÍÆ÷µÄÔËĞĞÊ±Õ»µÄĞÅÏ¢
 skynet.tracelog = c.trace
 
---trace logæ¶ˆæ¯
+--trace logÏûÏ¢
 -- true: force on
 -- false: force off
 -- nil: optional (use skynet.trace() to trace one message)
@@ -749,8 +750,8 @@ end
 
 local init_func = {}
 
---æœåŠ¡åˆå§‹åŒ– 
---è¿™é€šå¸¸ç”¨äº lua åº“çš„ç¼–å†™ã€‚ä½ éœ€è¦ç¼–å†™çš„æœåŠ¡å¼•ç”¨ä½ çš„åº“çš„æ—¶å€™ï¼Œäº‹å…ˆè°ƒç”¨ä¸€äº› skynet é˜»å¡ API ï¼Œå°±å¯ä»¥ç”¨ skynet.init æŠŠè¿™äº›å·¥ä½œæ³¨å†Œåœ¨ start ä¹‹å‰ã€‚
+--·şÎñ³õÊ¼»¯ 
+--ÕâÍ¨³£ÓÃÓÚ lua ¿âµÄ±àĞ´¡£ÄãĞèÒª±àĞ´µÄ·şÎñÒıÓÃÄãµÄ¿âµÄÊ±ºò£¬ÊÂÏÈµ÷ÓÃÒ»Ğ© skynet ×èÈû API £¬¾Í¿ÉÒÔÓÃ skynet.init °ÑÕâĞ©¹¤×÷×¢²áÔÚ start Ö®Ç°¡£
 function skynet.init(f, name)
 	assert(type(f) == "function")
 	if init_func == nil then
@@ -786,7 +787,7 @@ local function init_template(start, ...)
 	return ret(init_all, start(...))
 end
 
---é¢„å…ˆinitï¼Œåœ¨è°ƒç”¨
+--Ô¤ÏÈinit£¬ÔÚµ÷ÓÃ
 function skynet.pcall(start, ...)
 	return xpcall(init_template, debug.traceback, start, ...)
 end
@@ -802,7 +803,7 @@ function skynet.init_service(start)
 	end
 end
 
---æœåŠ¡å¯åŠ¨
+--·şÎñÆô¶¯
 function skynet.start(start_func)
 	c.callback(skynet.dispatch_message)
 	init_thread = skynet.timeout(0, function()
@@ -811,31 +812,31 @@ function skynet.start(start_func)
 	end)
 end
 
---è·å–æœåŠ¡æ˜¯å¦æ˜¯æ­»å¾ªç¯
+--»ñÈ¡·şÎñÊÇ·ñÊÇËÀÑ­»·
 function skynet.endless()
 	return (c.intcommand("STAT", "endless") == 1) --lua-skynet.c:lintcommand -> skynet_server.c:cmd_stat
 end
 
---è·å–æœåŠ¡æ¬¡çº§æ¶ˆæ¯é˜Ÿåˆ—é•¿åº¦(æœªå‘é€
+--»ñÈ¡·şÎñ´Î¼¶ÏûÏ¢¶ÓÁĞ³¤¶È(Î´·¢ËÍ
 function skynet.mqlen()
 	return c.intcommand("STAT", "mqlen")
 end
 
---"mqlen","endless","cpu"å ç”¨æ—¶é—´,"time"è¿è¡Œæ—¶é•¿,"message"å¤„ç†æ´¾å‘çš„æ¶ˆæ¯æ€»æ•°
+--"mqlen","endless","cpu"Õ¼ÓÃÊ±¼ä,"time"ÔËĞĞÊ±³¤,"message"´¦ÀíÅÉ·¢µÄÏûÏ¢×ÜÊı
 function skynet.stat(what)
 	return c.intcommand("STAT", what)
 end
 
 --
 function skynet.task(ret)
-	if ret == nil then --é»˜è®¤è¿”å›ä¼šè¯æ•°(ä¸€ä¼šè¯ä¸€åç¨‹
+	if ret == nil then --Ä¬ÈÏ·µ»Ø»á»°Êı(Ò»»á»°Ò»Ğ­³Ì
 		local t = 0
 		for session,co in pairs(session_id_coroutine) do
 			t = t + 1
 		end
 		return t
 	end
-	if ret == "init" then --åˆå§‹åŒ–
+	if ret == "init" then --³õÊ¼»¯
 		if init_thread then
 			return debug.traceback(init_thread)
 		else
@@ -843,19 +844,19 @@ function skynet.task(ret)
 		end
 	end
 	local tt = type(ret)
-	if tt == "table" then --è·å–ä¼šè¯åç¨‹ä¿¡æ¯
+	if tt == "table" then --»ñÈ¡»á»°Ğ­³ÌĞÅÏ¢
 		for session,co in pairs(session_id_coroutine) do
-			ret[session] = debug.traceback(co)
+			ret[session] = traceback(co)
 		end
 		return
-	elseif tt == "number" then --è·å–æŒ‡å®šä¼šè¯çš„åç¨‹ä¿¡æ¯
+	elseif tt == "number" then --»ñÈ¡Ö¸¶¨»á»°µÄĞ­³ÌĞÅÏ¢
 		local co = session_id_coroutine[ret]
 		if co then
 			return debug.traceback(co)
 		else
 			return "No session"
 		end
-	elseif tt == "thread" then --è·å–æŒ‡å®šåç¨‹çš„ä¼šè¯ä¿¡æ¯
+	elseif tt == "thread" then --»ñÈ¡Ö¸¶¨Ğ­³ÌµÄ»á»°ĞÅÏ¢
 		for session, co in pairs(session_id_coroutine) do
 			if co == ret then
 				return session
@@ -865,12 +866,36 @@ function skynet.task(ret)
 	end
 end
 
--- ä¼ skynet.PTYPE_ERROR ç»™æœåŠ¡service(æµ‹è¯•ç”¨ ç°æœ‰debug term
+function skynet.uniqtask()
+	local stacks = {}
+	for session, co in pairs(session_id_coroutine) do
+		local stack = traceback(co)
+		local info = stacks[stack] or {count = 0, sessions = {}}
+		info.count = info.count + 1
+		if info.count < 10 then
+			info.sessions[#info.sessions+1] = session
+		end
+		stacks[stack] = info
+	end
+	local ret = {}
+	for stack, info in pairs(stacks) do
+		local count = info.count
+		local sessions = table.concat(info.sessions, ",")
+		if count > 10 then
+			sessions = sessions .. "..."
+		end
+		local head_line = string.format("%d\tsessions:[%s]\n", count, sessions)
+		ret[head_line] = stack
+	end
+	return ret
+end
+
+-- ´«skynet.PTYPE_ERROR ¸ø·şÎñservice(²âÊÔÓÃ ÏÖÓĞdebug term
 function skynet.term(service)
 	return _error_dispatch(0, service)
 end
 
---è®¾ç½®æœåŠ¡æœ€å¤§å†…å­˜
+--ÉèÖÃ·şÎñ×î´óÄÚ´æ
 function skynet.memlimit(bytes)
 	debug.getregistry().memlimit = bytes
 	skynet.memlimit = nil	-- set only once

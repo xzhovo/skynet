@@ -172,7 +172,7 @@ end
 function suspend(co, result, command)
 	if not result then
 		local session = session_coroutine_id[co]
-		if session then -- coroutine may fork by others (session is nil)
+		if session then -- coroutine may fork by others or called skynet.ret/skynet.response/skynet.ignoreret (session is nil)
 			local addr = session_coroutine_address[co]
 			if session ~= 0 then
 				-- only call response error
@@ -181,9 +181,9 @@ function suspend(co, result, command)
 				c.send(addr, skynet.PTYPE_ERROR, session, "")
 			end
 			session_coroutine_id[co] = nil
-			session_coroutine_address[co] = nil
-			session_coroutine_tracetag[co] = nil
 		end
+		session_coroutine_address[co] = nil --注意：正常情况 session_coroutine_address[co] 不为 nil 则 session 一定不为 nil，见 raw_dispatch_message。但逻辑 CMD 可能没有该函数导致失败，此时会 skynet.ret then session is nil，从上面的 if 中拿出来规避此 协程泄漏 bug
+		session_coroutine_tracetag[co] = nil --同上
 		skynet.fork(function() end)	-- trigger command "SUSPEND"
 		error(debug.traceback(co,tostring(command)))
 	end

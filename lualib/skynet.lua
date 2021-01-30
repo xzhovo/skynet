@@ -204,11 +204,36 @@ function suspend(co, result, command)
 	end
 end
 
+local co_create_for_timeout
+local timeout_traceback
+
+function skynet.trace_timeout(on)
+	local function trace_coroutine(func, ti)
+		local co
+		co = co_create(function()
+			timeout_traceback[co] = nil
+			func()
+		end)
+		local info = string.format("TIMER %d+%d : ", skynet.now(), ti)
+		timeout_traceback[co] = traceback(info, 3)
+		return co
+	end
+	if on then
+		timeout_traceback = timeout_traceback or {}
+		co_create_for_timeout = trace_coroutine
+	else
+		timeout_traceback = nil
+		co_create_for_timeout = co_create
+	end
+end
+
+skynet.trace_timeout(false)	-- turn off by default
+
 --让框架在 ti 个单位时间后，调用 func 这个函数
 function skynet.timeout(ti, func)
 	local session = c.intcommand("TIMEOUT",ti)
 	assert(session)
-	local co = co_create(func)
+	local co = co_create_for_timeout(func, ti)
 	assert(session_id_coroutine[session] == nil)
 	session_id_coroutine[session] = co
 	return co	-- for debug
@@ -846,7 +871,11 @@ function skynet.task(ret)
 	local tt = type(ret)
 	if tt == "table" then --获取会话协程信息
 		for session,co in pairs(session_id_coroutine) do
-			ret[session] = traceback(co)
+			if timeout_traceback and timeout_traceback[co] then
+				ret[session] = timeout_traceback[co]
+			else
+				ret[session] = traceback(co)
+			end
 		end
 		return
 	elseif tt == "number" then --获取指定会话的协程信息

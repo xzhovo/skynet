@@ -20,11 +20,18 @@ local sha1= crypt.sha1
 local setmetatable = setmetatable
 local error = error
 local tonumber = tonumber
+local tointeger = math.tointeger
 
 local _M = { _VERSION = '0.14' }
 -- constants
 
-local COM_QUERY = 0x03
+local COM_QUERY = '\x03'
+local COM_PING = '\x0e'
+local COM_STMT_PREPARE = '\x16'
+local COM_STMT_EXECUTE = '\x17'
+
+local CURSOR_TYPE_NO_CURSOR = 0x00
+
 local SERVER_MORE_RESULTS_EXISTS = 8
 
 local mt = { __index = _M }
@@ -41,26 +48,33 @@ converters[0x09] = tonumber  -- int24
 converters[0x0d] = tonumber  -- year
 converters[0xf6] = tonumber  -- newdecimal
 
+local function _get_byte1(data, i)
+	return strbyte(data,i),i+1
+end
 
 local function _get_byte2(data, i)
 	return strunpack("<I2",data,i)
 end
 
-
 local function _get_byte3(data, i)
 	return strunpack("<I3",data,i)
 end
-
 
 local function _get_byte4(data, i)
 	return strunpack("<I4",data,i)
 end
 
-
 local function _get_byte8(data, i)
 	return strunpack("<I8",data,i)
 end
 
+local function _get_float(data, i)
+	return strunpack("<f",data,i)
+end
+
+local function _get_double(data, i)
+	return strunpack("<d",data,i)
+end
 
 local function _set_byte2(n)
     return strpack("<I2", n)
@@ -76,6 +90,17 @@ local function _set_byte4(n)
     return strpack("<I4", n)
 end
 
+local function _set_byte8(n)
+    return strpack("<I8", n)
+end
+
+local function _set_float(n)
+    return strpack("<f", n)
+end
+
+local function _set_double(n)
+    return strpack("<d", n)
+end
 
 local function _from_cstring(data, i)
     return strunpack("z", data, i)
@@ -106,11 +131,12 @@ local function _compute_token(password, scramble)
 		end)
 end
 
-local function _compose_packet(self, req, size)
+local function _compose_packet(self, req)
    self.packet_no = self.packet_no + 1
+   local size = #req
 
-    local packet = _set_byte3(size) .. strchar(self.packet_no) .. req
-    return packet
+   local packet = strpack("<I3Bc"..size,size,self.packet_no,req)
+   return packet
 end
 
 local function _recv_packet(self,sock)
@@ -189,6 +215,21 @@ local function _from_length_coded_bin(data, pos)
     return false, pos + 1
 end
 
+local function _set_length_coded_bin(n)
+    if n<251 then
+        return strchar(n)
+    end
+
+    if n<(1<<16) then
+        return strpack('<BI2',0xfc,n)
+    end
+
+    if n<(1<<24) then
+        return strpack('<BI3',0xfd,n)
+    end
+
+    return strpack('<BI8',0xfe,n)
+end
 
 local function _from_length_coded_str(data, pos)
     local len
@@ -432,29 +473,97 @@ local function _mysql_login(self,user,password,database,on_connect)
 			token,
 			database)
 
-        local packet_len = #req
-
-        local authpacket=_compose_packet(self,req,packet_len)
+        local authpacket=_compose_packet(self,req)
         sockchannel:request(authpacket, dispatch_resp)
-	if on_connect then
-		on_connect(self)
-	end
+        if on_connect then
+            on_connect(self)
+        end
     end
 end
 
+-- 构造ping数据包
+local function _compose_ping(self)
+    self.packet_no = -1
+
+    local querypacket = _compose_packet(self, COM_PING)
+    return querypacket
+end
 
 local function _compose_query(self, query)
 
     self.packet_no = -1
 
-    local cmd_packet = strchar(COM_QUERY) .. query
-    local packet_len = 1 + #query
+    local cmd_packet = COM_QUERY..query
 
-    local querypacket = _compose_packet(self, cmd_packet, packet_len)
+    local querypacket = _compose_packet(self, cmd_packet)
     return querypacket
 end
 
+local function _compose_stmt_prepare(self, query)
+    self.packet_no = -1
 
+    local cmd_packet = COM_STMT_PREPARE .. query
+
+    local querypacket = _compose_packet(self, cmd_packet)
+    return querypacket
+end
+
+--参数字段类型转换
+local store_types = {
+    number=function(v)
+        if not tointeger(v) then
+            return _set_byte2(0x05),_set_double(v)
+        else
+            return _set_byte2(0x08),_set_byte8(v)
+        end
+    end,
+    string=function(v)
+        return _set_byte2(0x0f),_set_length_coded_bin(#v)..v
+    end,
+    --bool转换为0,1
+    boolean=function(v)
+        if v then
+            return _set_byte2(0x01),strchar(1)
+        else
+            return _set_byte2(0x01),strchar(0)
+        end
+    end,
+}
+
+local function _compose_stmt_execute(self,stmt,cursor_type,args)
+    local arg_num = #args
+    if arg_num~=stmt.param_count then
+        error("require stmt.param_count "..stmt.param_count.." get arg_num "..arg_num)
+    end
+
+    self.packet_no = -1
+
+    local cmd_packet = strpack("<c1I4BI4",COM_STMT_EXECUTE,stmt.prepare_id,cursor_type,0x01)
+    if arg_num>0 then
+        local null_count=(arg_num+7)//8
+
+        local f,ts,vs
+        local types_buf=""
+        local values_buf=""
+
+        for _,v in pairs(args) do
+            f= store_types[type(v)]
+            if not f then
+                error("invalid parameter type",type(v))
+            end
+
+            ts,vs = f(v)
+
+            types_buf=types_buf..ts
+            values_buf=values_buf..vs
+        end
+
+        cmd_packet = cmd_packet..strrep("\0",null_count)..strchar(0x01)..types_buf..values_buf
+    end
+
+    local querypacket = _compose_packet(self, cmd_packet)
+    return querypacket
+end
 
 local function read_result(self, sock)
     local packet, typ, err = _recv_packet(self, sock)
@@ -623,6 +732,320 @@ function _M.query(self, query)
         self.query_resp = _query_resp(self)
     end
     return  sockchannel:request( querypacket, self.query_resp )
+end
+
+local function read_prepare_result(self, sock)
+    local resp = {}
+    local packet, typ, err = _recv_packet(self, sock)
+    if not packet then
+        resp.badresult = true
+        resp.errno = 300101
+        resp.err = err
+        return false, resp
+    end
+
+    if typ == "ERR" then
+        local errno, msg, sqlstate = _parse_err_packet(packet)
+        resp.badresult = true
+        resp.errno = errno
+        resp.err = msg
+        resp.sqlstate = sqlstate
+        return true, resp
+    end
+
+    --第一节只能是OK
+    if typ ~= "OK" then
+        resp.badresult = true
+        resp.errno = 300201
+        resp.err = "first typ must be OK,now"..typ
+        return false,resp
+    end
+    resp.prepare_id,resp.field_count,resp.param_count,resp.warning_count = strunpack("<I4I2I2xI2",packet,2)
+
+    resp.params = {}
+    resp.fields = {}
+
+    if resp.param_count >0 then
+        local param = _recv_field_packet(self,sock)
+        while param do
+            table.insert(resp.params,param)
+            param = _recv_field_packet(self,sock)
+        end
+    end
+    if resp.field_count>0 then
+        local field = _recv_field_packet(self,sock)
+        while field do
+            table.insert(resp.fields,field)
+            field = _recv_field_packet(self,sock)
+        end
+    end
+
+    return true,resp
+end
+
+local function _prepare_resp(self,sql)
+     return function(sock)
+        return read_prepare_result(self,sock,sql)
+    end
+end
+
+-- 注册预处理语句
+function _M.prepare(self,sql)
+    local querypacket = _compose_stmt_prepare(self, sql)
+    local sockchannel = self.sockchannel
+    if not self.prepare_resp then
+        self.prepare_resp = _prepare_resp(self)
+    end
+    return sockchannel:request( querypacket, self.prepare_resp )
+end
+
+local function _get_datetime(data,pos)
+    local len,year,month,day,hour,minute,second
+    local value
+    len,pos = _from_length_coded_bin(data,pos)
+    if len==7 then
+        year,month,day,hour,minute,second,pos=string.unpack("<I2BBBBB",data,pos)
+        value = strformat("%04d-%02d-%02d %02d:%02d:%02d",year,month,day,hour,minute,second)
+    else
+        value = "2017-09-09 20:08:09"
+        --unsupported format
+        pos=pos+len
+    end
+    return value,pos
+end
+
+local _binary_parser = {
+    [0x01] = _get_byte1,
+    [0x02] = _get_byte2,
+    [0x03] = _get_byte4,
+    [0x04] = _get_float,
+    [0x05] = _get_double,
+    [0x07] = _get_datetime,
+    [0x08] = _get_byte8,
+    [0x0c] = _get_datetime,
+    [0x0f] = _from_length_coded_str,
+    [0x10] = _from_length_coded_str,
+    [0xf9] = _from_length_coded_str,
+    [0xfa] = _from_length_coded_str,
+    [0xfb] = _from_length_coded_str,
+    [0xfc] = _from_length_coded_str,
+    [0xfd] = _from_length_coded_str,
+    [0xfe] = _from_length_coded_str,
+}
+
+local function _parse_row_data_binary(data, cols, compact)
+    local ncols = #cols
+    -- 空位图,前两个bit系统保留 (列数量 + 7 + 2) / 8
+    local null_count=(ncols+9)//8
+    local pos = 2+null_count
+    local value
+
+    --空字段表
+    local null_fields= {}
+    local field_index=1
+    local byte
+    for i=2,pos-1 do
+        byte = strbyte(data,i)
+        for j=0,7 do
+            if field_index>2 then
+                if byte&(1<<j)==0 then
+                    null_fields[field_index-2]=false
+                else
+                    null_fields[field_index-2]=true
+                end
+            end
+            field_index=field_index+1
+        end
+    end
+
+    local row = {}
+    local parser
+    for i = 1, ncols do
+        local col = cols[i]
+        local typ = col.type
+        local name = col.name
+
+        if not null_fields[i] then
+            parser = _binary_parser[typ]
+            if not parser then
+                error("_parse_row_data_binary()error,unsupported field type "..typ)
+            end
+            value,pos = parser(data,pos)
+
+            if compact then
+                row[i] = value
+            else
+                row[name] = value
+            end
+        end
+    end
+
+    return row
+end
+
+local function read_execute_result(self,sock)
+    local packet, typ, err = _recv_packet(self, sock)
+    if not packet then
+        return nil, err
+        --error( err )
+    end
+
+    if typ == "ERR" then
+        local errno, msg, sqlstate = _parse_err_packet(packet)
+        return nil, msg, errno, sqlstate
+        --error( strformat("errno:%d, msg:%s,sqlstate:%s",errno,msg,sqlstate))
+    end
+
+    if typ == 'OK' then
+        local res = _parse_ok_packet(packet)
+        if res and res.server_status&SERVER_MORE_RESULTS_EXISTS ~= 0 then
+            return res, "again"
+        end
+        return res
+    end
+
+    if typ ~= 'DATA' then
+        return nil, "packet type " .. typ .. " not supported"
+        --error( "packet type " .. typ .. " not supported" )
+    end
+
+    -- typ == 'DATA'
+
+    local field_count, extra = _parse_result_set_header_packet(packet)
+
+    local cols = {}
+    local col
+    while true do
+        packet, typ, err = _recv_packet(self, sock)
+        if typ=="EOF" then
+            local warning_count, status_flags = _parse_eof_packet(packet)
+            break
+        end
+
+        col = _parse_field_packet(packet)
+        if not col then
+            break
+            --error( strformat("errno:%d, msg:%s,sqlstate:%s",errno,msg,sqlstate))
+        end
+
+        table.insert(cols,col)
+    end
+
+    --没有记录集返回
+    if #cols<1 then
+        return {}
+    end
+
+    local compact = self.compact
+    local rows = {}
+    local row
+    while true do
+        packet, typ, err = _recv_packet(self, sock)
+
+        if typ=="EOF" then
+            local warning_count, status_flags = _parse_eof_packet(packet)
+            if status_flags&SERVER_MORE_RESULTS_EXISTS ~= 0 then
+                return rows, "again"
+            end
+            break
+        end
+
+        row = _parse_row_data_binary(packet,cols,compact)
+        if not col then
+            break
+        end
+
+        table.insert(rows,row)
+    end
+
+    return rows
+end
+
+local function _execute_resp(self)
+     return function(sock)
+        local res, err, errno, sqlstate = read_execute_result(self,sock)
+        if not res then
+            local badresult ={}
+            badresult.badresult = true
+            badresult.err = err
+            badresult.errno = errno
+            badresult.sqlstate = sqlstate
+            return true , badresult
+        end
+        if err ~= "again" then
+            return true, res
+        end
+        local mulitresultset = {res}
+        mulitresultset.mulitresultset = true
+        local i =2
+        while err =="again" do
+            res, err, errno, sqlstate = read_execute_result(self,sock)
+            if not res then
+                mulitresultset.badresult = true
+                mulitresultset.err = err
+                mulitresultset.errno = errno
+                mulitresultset.sqlstate = sqlstate
+                return true, mulitresultset
+            end
+            mulitresultset[i]=res
+            i=i+1
+        end
+        return true, mulitresultset
+     end
+end
+
+--[[
+    执行预处理语句
+    失败返回字段
+        errno
+        badresult
+        sqlstate
+        err
+]]
+function _M.execute(self, stmt,...)
+    -- 检查参数，不能为nil
+    local p_n = select('#',...)
+    local p_v
+    for i=1,p_n do
+        p_v = select(i,...)
+        if p_v==nil then
+            return {
+                badresult=true,
+                errno=30902,
+                err="parameter "..i.." is nil",
+            }
+        end
+    end
+
+    local querypacket,er = _compose_stmt_execute(self,stmt,CURSOR_TYPE_NO_CURSOR,{...})
+    if not querypacket then
+        return {
+            badresult=true,
+            errno=30902,
+            err=er,
+        }
+    end
+    local sockchannel = self.sockchannel
+    if not self.execute_resp then
+        self.execute_resp = _execute_resp(self)
+    end
+    return sockchannel:request( querypacket, self.execute_resp )
+end
+
+function _M.ping(self)
+    local querypacket,er = _compose_ping(self)
+    if not querypacket then
+        return {
+            badresult=true,
+            errno=30902,
+            err=er,
+        }
+    end
+    local sockchannel = self.sockchannel
+    if not self.query_resp then
+        self.query_resp = _query_resp(self)
+    end
+    return sockchannel:request( querypacket, self.query_resp )
 end
 
 function _M.server_ver(self)

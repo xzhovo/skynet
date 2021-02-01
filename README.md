@@ -1,5 +1,7 @@
 ## ![skynet logo](https://github.com/cloudwu/skynet/wiki/image/skynet_metro.jpg)
 
+* 未升级lua5.4的lua5.3版本skynet，5.4之后改动较大
+
 Skynet is a lightweight online game framework which can be used in many other fields.
 
 ## Build

@@ -16,9 +16,10 @@ invalid_type(int type) {
 	return type != PTYPE_SYSTEM && type != PTYPE_HARBOR;
 }
 
+// 通过本节点的 horbor 发送远程消息其他节点 horbar service_horbor.c:mainloop->remote_send_handle/remote_send_name ，主消息类型 PTYPE_SYSTEM 真发送消息类型 PTYPE_SOCKET
 void 
 skynet_harbor_send(struct remote_message *rmsg, uint32_t source, int session) {
-	assert(invalid_type(rmsg->type) && REMOTE);
+	assert(invalid_type(rmsg->type) && REMOTE); // 只能是 PTYPE_SOCKET
 	skynet_context_send(REMOTE, rmsg, sizeof(*rmsg) , source, PTYPE_SYSTEM , session);
 }
 

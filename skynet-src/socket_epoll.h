@@ -1,4 +1,4 @@
-#ifndef poll_socket_epoll_h
+#ifndef poll_socket_epoll_h // for linux
 #define poll_socket_epoll_h
 
 #include <netdb.h>
@@ -44,9 +44,9 @@ sp_del(int efd, int sock) {
 static void 
 sp_write(int efd, int sock, void *ud, bool enable) {
 	struct epoll_event ev;
-	ev.events = EPOLLIN | (enable ? EPOLLOUT : 0);
+	ev.events = EPOLLIN | (enable ? EPOLLOUT : 0); // EPOLLIN 连接到达/有数据来临；EPOLLOUT 有数据要写
 	ev.data.ptr = ud;
-	epoll_ctl(efd, EPOLL_CTL_MOD, sock, &ev);
+	epoll_ctl(efd, EPOLL_CTL_MOD, sock, &ev); // 修改已经注册的 sock 的监听事件
 }
 
 static int 

@@ -38,10 +38,10 @@ function gateserver.start(handler)
 		maxclient = conf.maxclient or 1024
 		nodelay = conf.nodelay
 		skynet.error(string.format("Listen on %s:%d", address, port))
-		socket = socketdriver.listen(address, port)
+		socket = socketdriver.listen(address, port) -- socket slot id
 		socketdriver.start(socket)
 		if handler.open then
-			return handler.open(source, conf)
+			return handler.open(source, conf) -- gate open for wathdog = source and conf
 		end
 	end
 
@@ -132,7 +132,7 @@ function gateserver.start(handler)
 		name = "socket",
 		id = skynet.PTYPE_SOCKET,	-- PTYPE_SOCKET = 6
 		unpack = function ( msg, sz )
-			return netpack.filter( queue, msg, sz)
+			return netpack.filter( queue, msg, sz) --lua-netpack.c:lfilter
 		end,
 		dispatch = function (_, _, q, type, ...)
 			queue = q

@@ -1,3 +1,6 @@
+--用于 UniqueService 管理(专用于服务管理的模块，对于同一个名字，只允许启动一次，且不准更换
+--唯一服务，如果你需要整个网络有唯一的服务，那么可以在调用 uniqueservice 的参数前加一个 true ，表示这是一个全局服务。
+--如果这个服务不存在，这个 api 会一直阻塞到它启动好为止。
 local skynet = require "skynet"
 require "skynet.manager"	-- import skynet.register
 local snax = require "skynet.snax"
@@ -5,6 +8,7 @@ local snax = require "skynet.snax"
 local cmd = {}
 local service = {}
 
+--发送请求
 local function request(name, func, ...)
 	local ok, handle = pcall(func, ...)
 	local s = service[name]
@@ -15,7 +19,7 @@ local function request(name, func, ...)
 		service[name] = tostring(handle)
 	end
 
-	for _,v in ipairs(s) do
+	for _,v in ipairs(s) do --唤醒func为阻塞函数时之后阻塞的相同操作协程
 		skynet.wakeup(v.co)
 	end
 
@@ -26,6 +30,7 @@ local function request(name, func, ...)
 	end
 end
 
+--合并不同协程的相同请求，只保留第一个
 local function waitfor(name , func, ...)
 	local s = service[name]
 	if type(s) == "number" then
@@ -50,7 +55,7 @@ local function waitfor(name , func, ...)
 			source = source,
 			co = co,
 		}
-		return request(name, func, ...)
+		return request(name, func, ...) --第一个，直接请求
 	end
 
 	table.insert(s, {
@@ -58,7 +63,7 @@ local function waitfor(name , func, ...)
 		session = session,
 		source = source,
 	})
-	skynet.wait()
+	skynet.wait() --s.launch ~= nil 即已有协程操作了，将当前信息插入s
 	s = service[name]
 	if type(s) == "string" then
 		error(s)
@@ -75,16 +80,18 @@ local function read_name(service_name)
 	end
 end
 
+--主节点方法，注册
 function cmd.LAUNCH(service_name, subname, ...)
-	local realname = read_name(service_name)
+	local realname = read_name(service_name) --去@
 
 	if realname == "snaxd" then
 		return waitfor(service_name.."."..subname, snax.rawnewservice, subname, ...)
 	else
-		return waitfor(service_name, skynet.newservice, realname, subname, ...)
+		return waitfor(service_name, skynet.newservice, realname, subname, ...) --skynet.newservice
 	end
 end
 
+--主节点方法，获取地址
 function cmd.QUERY(service_name, subname)
 	local realname = read_name(service_name)
 
@@ -95,6 +102,7 @@ function cmd.QUERY(service_name, subname)
 	end
 end
 
+--全网消息信息
 local function list_service()
 	local result = {}
 	for k,v in pairs(service) do
@@ -103,7 +111,7 @@ local function list_service()
 		elseif type(v) == "table" then
 			local querying = {}
 			if v.launch then
-				local session = skynet.task(v.launch.co)
+				local session = skynet.task(v.launch.co) --第一个能生效的协程的会话信息
 				local launching_address = skynet.call(".launcher", "lua", "QUERY", session)
 				if launching_address then
 					table.insert(querying, "Init as " .. skynet.address(launching_address))
@@ -129,7 +137,7 @@ local function list_service()
 	return result
 end
 
-
+--本节点就是主节点
 local function register_global()
 	function cmd.GLAUNCH(name, ...)
 		local global_name = "@" .. name
@@ -147,7 +155,7 @@ local function register_global()
 		mgr[m] = true
 	end
 
-	local function add_list(all, m)
+	local function add_list(all, m) --统计所有子节点
 		local harbor = "@" .. skynet.harbor(m)
 		local result = skynet.call(m, "lua", "LIST")
 		for k,v in pairs(result) do
@@ -168,6 +176,7 @@ local function register_global()
 	end
 end
 
+--非主节点方法
 local function register_local()
 	local function waitfor_remote(cmd, name, ...)
 		local global_name = "@" .. name
@@ -177,18 +186,20 @@ local function register_local()
 		else
 			local_name = global_name
 		end
-		return waitfor(local_name, skynet.call, "SERVICE", "lua", cmd, global_name, ...)
+		return waitfor(local_name, skynet.call, "SERVICE", "lua", cmd, global_name, ...) --询问主节点
 	end
 
+	--全网注册服务
 	function cmd.GLAUNCH(...)
 		return waitfor_remote("LAUNCH", ...)
 	end
 
+	--全网获取服务地址
 	function cmd.GQUERY(...)
 		return waitfor_remote("QUERY", ...)
 	end
 
-	function cmd.LIST()
+	function cmd.LIST() --统计自己
 		return list_service()
 	end
 
@@ -218,10 +229,10 @@ skynet.start(function()
 	else
 		skynet.register(".service")
 	end
-	if skynet.getenv "standalone" then
-		skynet.register("SERVICE")
-		register_global()
+	if skynet.getenv "standalone" then --是主节点
+		skynet.register("SERVICE") --全网注册SERVICE
+		register_global() --全网函数直接访问
 	else
-		register_local()
+		register_local() --全网函数访问主节点
 	end
 end)

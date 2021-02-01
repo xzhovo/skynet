@@ -353,7 +353,7 @@ lfilter(lua_State *L) {
 		// ignore listen id (message->id)
 		assert(size == -1);	// never padding string
 		return filter_data(L, message->id, (uint8_t *)buffer, message->ud);
-	case SKYNET_SOCKET_TYPE_CONNECT:
+	case SKYNET_SOCKET_TYPE_CONNECT: // listen / accept / forward
 		// ignore listen fd connect
 		return 1;
 	case SKYNET_SOCKET_TYPE_CLOSE:

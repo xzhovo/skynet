@@ -15,8 +15,8 @@ struct snlua {
 	lua_State * L;
 	struct skynet_context * ctx;
 	size_t mem;
-	size_t mem_report;
-	size_t mem_limit;
+	size_t mem_report; // 内存报警
+	size_t mem_limit; // 内存上限
 };
 
 // LUA_CACHELIB may defined in patched lua for shared proto
@@ -50,7 +50,7 @@ static int
 traceback (lua_State *L) {
 	const char *msg = lua_tostring(L, 1);
 	if (msg)
-		luaL_traceback(L, L, msg, 1);
+		luaL_traceback(L, L, msg, 1); // 有报错，栈回溯信息压栈，附加msg到栈回溯信息之前 就是我们看到的红色报错
 	else {
 		lua_pushliteral(L, "(no error message)");
 	}
@@ -76,15 +76,16 @@ static int
 init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t sz) {
 	lua_State *L = l->L;
 	l->ctx = ctx;
-	lua_gc(L, LUA_GCSTOP, 0);
+	lua_gc(L, LUA_GCSTOP, 0); // 停止垃圾收集器
 	lua_pushboolean(L, 1);  /* signal for libraries to ignore env. vars. */
-	lua_setfield(L, LUA_REGISTRYINDEX, "LUA_NOENV");
+	lua_setfield(L, LUA_REGISTRYINDEX, "LUA_NOENV"); // 设置假索引内LUA_NOENV变量值为true，忽略环境变量
 	luaL_openlibs(L);
 	lua_pushlightuserdata(L, ctx);
-	lua_setfield(L, LUA_REGISTRYINDEX, "skynet_context");
-	luaL_requiref(L, "skynet.codecache", codecache , 0);
+	lua_setfield(L, LUA_REGISTRYINDEX, "skynet_context"); // 设置假索引内skynet_context变量值为ctx
+	luaL_requiref(L, "skynet.codecache", codecache , 0); // skynet.codecache = luaopen_cache
 	lua_pop(L,1);
 
+	// config路径
 	const char *path = optstring(ctx, "lua_path","./lualib/?.lua;./lualib/?/init.lua");
 	lua_pushstring(L, path);
 	lua_setglobal(L, "LUA_PATH");
@@ -98,18 +99,21 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 	lua_pushstring(L, preload);
 	lua_setglobal(L, "LUA_PRELOAD");
 
-	lua_pushcfunction(L, traceback);
+	lua_pushcfunction(L, traceback); // traceback C函数压栈,lua function压栈调用时调用traceback C函数供检测报错
 	assert(lua_gettop(L) == 1);
 
 	const char * loader = optstring(ctx, "lualoader", "./lualib/loader.lua");
 
+	// loader.lua编译好压入栈顶
 	int r = luaL_loadfile(L,loader);
 	if (r != LUA_OK) {
-		skynet_error(ctx, "Can't load %s : %s", loader, lua_tostring(L, -1));
-		report_launcher_error(ctx);
+		skynet_error(ctx, "Can't load %s : %s", loader, lua_tostring(L, -1)); // error消息发给logger
+		report_launcher_error(ctx); // 告诉.launcher本服务状态异常，.launcher不存在则忽略
 		return 1;
 	}
+	// 压入lua服务名
 	lua_pushlstring(L, args, sz);
+	// 执行loader.lua的main
 	r = lua_pcall(L,1,0,1);
 	if (r != LUA_OK) {
 		skynet_error(ctx, "lua loader error : %s", lua_tostring(L, -1));
@@ -117,7 +121,7 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 		return 1;
 	}
 	lua_settop(L,0);
-	if (lua_getfield(L, LUA_REGISTRYINDEX, "memlimit") == LUA_TNUMBER) {
+	if (lua_getfield(L, LUA_REGISTRYINDEX, "memlimit") == LUA_TNUMBER) { // skynet.memlimit设置最大内存
 		size_t limit = lua_tointeger(L, -1);
 		l->mem_limit = limit;
 		skynet_error(ctx, "Set memory limit to %.2f M", (float)limit / (1024 * 1024));
@@ -126,7 +130,7 @@ init_cb(struct snlua *l, struct skynet_context *ctx, const char * args, size_t s
 	}
 	lua_pop(L, 1);
 
-	lua_gc(L, LUA_GCRESTART, 0);
+	lua_gc(L, LUA_GCRESTART, 0); // 开始GC
 
 	return 0;
 }
@@ -135,8 +139,8 @@ static int
 launch_cb(struct skynet_context * context, void *ud, int type, int session, uint32_t source , const void * msg, size_t sz) {
 	assert(type == 0 && session == 0);
 	struct snlua *l = ud;
-	skynet_callback(context, NULL, NULL);
-	int err = init_cb(l, context, msg, sz);
+	skynet_callback(context, NULL, NULL); // 回调函数空
+	int err = init_cb(l, context, msg, sz); // 初始化回调函数，一般即skynet.start(或skynet.forward_type)时的skynet.dispatch_message
 	if (err) {
 		skynet_command(context, "EXIT", NULL);
 	}
@@ -144,16 +148,17 @@ launch_cb(struct skynet_context * context, void *ud, int type, int session, uint
 	return 0;
 }
 
+//args 服务名等信息
 int
 snlua_init(struct snlua *l, struct skynet_context *ctx, const char * args) {
 	int sz = strlen(args);
 	char * tmp = skynet_malloc(sz);
 	memcpy(tmp, args, sz);
-	skynet_callback(ctx, l , launch_cb);
-	const char * self = skynet_command(ctx, "REG", NULL);
-	uint32_t handle_id = strtoul(self+1, NULL, 16);
+	skynet_callback(ctx, l , launch_cb); // 设置回调函数 
+	const char * self = skynet_command(ctx, "REG", NULL); // 注册地址:00...
+	uint32_t handle_id = strtoul(self+1, NULL, 16); // 16进制ID
 	// it must be first message
-	skynet_send(ctx, 0, handle_id, PTYPE_TAG_DONTCOPY,0, tmp, sz);
+	skynet_send(ctx, 0, handle_id, PTYPE_TAG_DONTCOPY,0, tmp, sz); // 通知服务，触发回调进入launch_cb
 	return 0;
 }
 

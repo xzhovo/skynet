@@ -16,51 +16,56 @@ struct handle_name {
 	uint32_t handle;
 };
 
+// skynet_context管理器结构
 struct handle_storage {
-	struct rwlock lock;
-
-	uint32_t harbor;
-	uint32_t handle_index;
-	int slot_size;
-	struct skynet_context ** slot;
-	
-	int name_cap;
-	int name_count;
-	struct handle_name *name;
+	//因为我们访问一个服务的机会，远大于创建一个服务并写入列表的机会，因此这里用了读写锁，
+	//在通过handle获取context指针时，加了一个读取锁，这样当在读取的过程中，
+	//同时有新的服务创建，并且存在要扩充skynet_context list容量的风险( rehash 和长度改变)，因此不论如何，他都应当被阻塞住，直到所有的读取锁都释放掉。
+    struct rwlock lock;            // 读写锁
+    
+    uint32_t harbor;               // harbor id
+    uint32_t handle_index;         // 创建下一个服务时，该服务的slot idx，一般会先判断该slot是否被占用，初始1
+    int slot_size;                 // slot的大小，一定是2^n，初始值是4
+    struct skynet_context ** slot; // skynet_context list
+        
+    int name_cap;                  // 别名列表大小，大小为2^n，初始2
+    int name_count;                // 别名数量，初始0
+    struct handle_name *name;      // 别名列表
 };
 
-static struct handle_storage *H = NULL;
+static struct handle_storage *H = NULL; // skynet_context管理器
 
 uint32_t
 skynet_handle_register(struct skynet_context *ctx) {
 	struct handle_storage *s = H;
 
-	rwlock_wlock(&s->lock);
+	rwlock_wlock(&s->lock); // 锁住写
 	
 	for (;;) {
 		int i;
 		uint32_t handle = s->handle_index;
 		for (i=0;i<s->slot_size;i++,handle++) {
-			if (handle > HANDLE_MASK) {
+			if (handle > HANDLE_MASK) { // #define HANDLE_MASK 0xffffff 轮回
 				// 0 is reserved
 				handle = 1;
 			}
-			int hash = handle & (s->slot_size-1);
+			int hash = handle & (s->slot_size-1); // 控制slot list成倍递增，初始4，即可使用0-3
 			if (s->slot[hash] == NULL) {
 				s->slot[hash] = ctx;
 				s->handle_index = handle + 1;
 
 				rwlock_wunlock(&s->lock);
 
-				handle |= s->harbor;
+				handle |= s->harbor; // 加上<16进制config.harbor>00000000，这里还是二进制
 				return handle;
 			}
 		}
+		// 位置不足，slot list成倍递增，转存替换
 		assert((s->slot_size*2 - 1) <= HANDLE_MASK);
 		struct skynet_context ** new_slot = skynet_malloc(s->slot_size * 2 * sizeof(struct skynet_context *));
 		memset(new_slot, 0, s->slot_size * 2 * sizeof(struct skynet_context *));
 		for (i=0;i<s->slot_size;i++) {
-			int hash = skynet_context_handle(s->slot[i]) & (s->slot_size * 2 - 1);
+			int hash = skynet_context_handle(s->slot[i]) & (s->slot_size * 2 - 1); //rehash
 			assert(new_slot[hash] == NULL);
 			new_slot[hash] = s->slot[i];
 		}
@@ -70,6 +75,7 @@ skynet_handle_register(struct skynet_context *ctx) {
 	}
 }
 
+//注销
 int
 skynet_handle_retire(uint32_t handle) {
 	int ret = 0;
@@ -81,10 +87,10 @@ skynet_handle_retire(uint32_t handle) {
 	struct skynet_context * ctx = s->slot[hash];
 
 	if (ctx != NULL && skynet_context_handle(ctx) == handle) {
-		s->slot[hash] = NULL;
+		s->slot[hash] = NULL; //置空
 		ret = 1;
 		int i;
-		int j=0, n=s->name_count;
+		int j=0, n=s->name_count; //删别名
 		for (i=0; i<n; ++i) {
 			if (s->name[i].handle == handle) {
 				skynet_free(s->name[i].name);
@@ -98,6 +104,7 @@ skynet_handle_retire(uint32_t handle) {
 	} else {
 		ctx = NULL;
 	}
+	//不用管index，它会自己遍历判断NULL
 
 	rwlock_wunlock(&s->lock);
 
@@ -133,12 +140,13 @@ skynet_handle_retireall() {
 	}
 }
 
+// 通过 handle 找对应上下文
 struct skynet_context * 
 skynet_handle_grab(uint32_t handle) {
 	struct handle_storage *s = H;
 	struct skynet_context * result = NULL;
 
-	rwlock_rlock(&s->lock);
+	rwlock_rlock(&s->lock); //锁住，避免 skynet_context list 扩容风险
 
 	uint32_t hash = handle & (s->slot_size-1);
 	struct skynet_context * ctx = s->slot[hash];
@@ -152,9 +160,10 @@ skynet_handle_grab(uint32_t handle) {
 	return result;
 }
 
+// 通过别名找对应上下文的 ctx->handle 
 uint32_t 
 skynet_handle_findname(const char * name) {
-	struct handle_storage *s = H;
+	struct handle_storage *s = H; //上下文管理器
 
 	rwlock_rlock(&s->lock);
 
@@ -162,7 +171,7 @@ skynet_handle_findname(const char * name) {
 
 	int begin = 0;
 	int end = s->name_count - 1;
-	while (begin<=end) {
+	while (begin<=end) { //二分法
 		int mid = (begin+end)/2;
 		struct handle_name *n = &s->name[mid];
 		int c = strcmp(n->name, name);
@@ -243,6 +252,7 @@ skynet_handle_namehandle(uint32_t handle, const char *name) {
 	return ret;
 }
 
+//harbor config中的harbor代表节点数
 void 
 skynet_handle_init(int harbor) {
 	assert(H==NULL);
@@ -253,7 +263,8 @@ skynet_handle_init(int harbor) {
 
 	rwlock_init(&s->lock);
 	// reserve 0 for system
-	s->harbor = (uint32_t) (harbor & 0xff) << HANDLE_REMOTE_SHIFT;
+	s->harbor = (uint32_t) (harbor & 0xff) << HANDLE_REMOTE_SHIFT; // #define HANDLE_REMOTE_SHIFT 24 
+	//<config.harbor>000000000000000000000000 之后会转16进制 <16进制config.harbor>00000000
 	s->handle_index = 1;
 	s->name_cap = 2;
 	s->name_count = 0;

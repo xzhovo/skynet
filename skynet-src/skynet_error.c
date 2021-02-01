@@ -25,8 +25,8 @@ skynet_error(struct skynet_context * context, const char *msg, ...) {
 
 	va_list ap;
 
-	va_start(ap,msg);
-	int len = vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap);
+	va_start(ap,msg); //获得 ...
+	int len = vsnprintf(tmp, LOG_MESSAGE_SIZE, msg, ap); // 拼字符串
 	va_end(ap);
 	if (len >=0 && len < LOG_MESSAGE_SIZE) {
 		data = skynet_strdup(tmp);
@@ -55,11 +55,11 @@ skynet_error(struct skynet_context * context, const char *msg, ...) {
 	if (context == NULL) {
 		smsg.source = 0;
 	} else {
-		smsg.source = skynet_context_handle(context);
+		smsg.source = skynet_context_handle(context); // 出发地，源skynet_context
 	}
-	smsg.session = 0;
-	smsg.data = data;
-	smsg.sz = len | ((size_t)PTYPE_TEXT << MESSAGE_TYPE_SHIFT);
+	smsg.session = 0; // 不回复
+	smsg.data = data; // 字符串数据
+	smsg.sz = len | ((size_t)PTYPE_TEXT << MESSAGE_TYPE_SHIFT); // #define MESSAGE_TYPE_SHIFT ((sizeof(size_t)-1) * 8)
 	skynet_context_push(logger, &smsg);
 }
 

@@ -21,8 +21,8 @@
 #define PTYPE_RESERVED_LUA 10
 #define PTYPE_RESERVED_SNAX 11
 
-#define PTYPE_TAG_DONTCOPY 0x10000
-#define PTYPE_TAG_ALLOCSESSION 0x20000
+#define PTYPE_TAG_DONTCOPY 0x10000 //你不要深复制
+#define PTYPE_TAG_ALLOCSESSION 0x20000 //需要分配session
 
 struct skynet_context;
 

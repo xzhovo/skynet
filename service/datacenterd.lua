@@ -1,3 +1,7 @@
+--用来在整个网络做跨节点的数据共享
+--你还可以通过它来交换 Multicast 的频道号等各种信息。
+--datacenter 其实是通过在 master 节点上部署了一个专门的数据中心服务来共享这些数据的。瓶颈
+--cluster模式下不能直接使用
 local skynet = require "skynet"
 
 local command = {}
@@ -5,18 +9,21 @@ local database = {}
 local wait_queue = {}
 local mode = {}
 
-local function query(db, key, ...)
+local function query(lvl, db, key, ...)
+	if db == nil then --自定义部分 lvl is for this
+		return nil, lvl
+	end
 	if key == nil then
 		return db
 	else
-		return query(db[key], ...)
+		return query(lvl+1, db[key], ...)
 	end
 end
 
 function command.QUERY(key, ...)
 	local d = database[key]
 	if d then
-		return query(d, ...)
+		return query(1, d, ...)
 	end
 end
 
@@ -58,11 +65,11 @@ local function wakeup(db, key1, ...)
 end
 
 function command.UPDATE(...)
-	local ret, value = update(database, ...)
+	local ret, value = update(database, ...) --写
 	if ret or value == nil then
 		return ret
 	end
-	local q = wakeup(wait_queue, ...)
+	local q = wakeup(wait_queue, ...) --唤醒等数据的
 	if q then
 		for _, response in ipairs(q) do
 			response(true,value)
@@ -74,16 +81,16 @@ local function waitfor(db, key1, key2, ...)
 	if key2 == nil then
 		-- push queue
 		local q = db[key1]
-		if q == nil then
+		if q == nil then --叶
 			q = { [mode] = "queue" }
 			db[key1] = q
 		else
 			assert(q[mode] == "queue")
 		end
-		table.insert(q, skynet.response())
+		table.insert(q, skynet.response()) --用于延迟回应
 	else
 		local q = db[key1]
-		if q == nil then
+		if q == nil then --支
 			q = { [mode] = "branch" }
 			db[key1] = q
 		else
@@ -95,11 +102,11 @@ end
 
 skynet.start(function()
 	skynet.dispatch("lua", function (_, _, cmd, ...)
-		if cmd == "WAIT" then
+		if cmd == "WAIT" then --读or等
 			local ret = command.QUERY(...)
 			if ret then
 				skynet.ret(skynet.pack(ret))
-			else
+			else --直到有人更新这个分支才返回
 				waitfor(wait_queue, ...)
 			end
 		else

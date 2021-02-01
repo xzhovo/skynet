@@ -76,7 +76,7 @@ _init_env(lua_State *L) {
 
 int sigign() {
 	struct sigaction sa;
-	sa.sa_handler = SIG_IGN;
+	sa.sa_handler = SIG_IGN; //SIG_IGN 忽略信号的处理程序
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGPIPE, &sa, 0);
@@ -159,7 +159,7 @@ main(int argc, char *argv[]) {
 	config.daemon = optstring("daemon", NULL);
 	config.logger = optstring("logger", NULL);
 	config.logservice = optstring("logservice", "logger");
-	config.profile = optboolean("profile", 1);
+	config.profile = optboolean("profile", 1); //默认为 true, 可以用来统计每个服务使用了多少 cpu 时间。
 
 	lua_close(L);
 

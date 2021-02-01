@@ -69,7 +69,13 @@ local function docmd(cmdline, print, fd)
 			split[1] = cmdline
 			ok, list = pcall(cmd, split)
 		else
-			print("Invalid command, type help for command list")
+			local my_monitor = skynet.getenv "my_monitor"
+			if my_monitor then
+				ok, list = skynet.call(my_monitor, "lua", command, table.unpack(split,2))
+			end
+            if not ok then
+                print("Invalid command, type help for command list")
+            end
 		end
 	end
 
@@ -330,18 +336,6 @@ function COMMAND.signal(address, sig)
 	end
 end
 
-function COMMAND.cmem()
-	local info = memory.info()
-	local tmp = {}
-	for k,v in pairs(info) do
-		tmp[skynet.address(k)] = v
-	end
-	tmp.total = memory.total()
-	tmp.block = memory.block()
-
-	return tmp
-end
-
 function COMMAND.ping(address)
 	address = adjust_address(address)
 	local ti = skynet.now()
@@ -415,6 +409,18 @@ local function convert_stat(info)
 	info.wbuffer = bytes(info.wbuffer)
 	info.rtime = time(info.rtime)
 	info.wtime = time(info.wtime)
+end
+
+function COMMAND.cmem()
+	local info = memory.info()
+	local tmp = {}
+	for k,v in pairs(info) do
+		tmp[skynet.address(k)] = v
+	end
+	tmp.total = bytes(memory.total())
+	tmp.block = memory.block()
+
+	return tmp
 end
 
 function COMMAND.netstat()

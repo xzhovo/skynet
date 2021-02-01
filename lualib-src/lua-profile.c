@@ -20,7 +20,7 @@ static double
 get_time() {
 #if  !defined(__APPLE__)
 	struct timespec ti;
-	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ti);
+	clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ti); //本线程到当前代码系统CPU花费的时间
 
 	int sec = ti.tv_sec & 0xffff;
 	int nsec = ti.tv_nsec;
@@ -50,6 +50,7 @@ diff_time(double start) {
 	}
 }
 
+// 开始记录实际消息处理消耗时间，不包括挂起(调用 lstart 时协程已经被唤醒)
 static int
 lstart(lua_State *L) {
 	if (lua_gettop(L) != 0) {
@@ -68,7 +69,7 @@ lstart(lua_State *L) {
 	lua_rawset(L, lua_upvalueindex(2));
 
 	lua_pushvalue(L, 1);	// push coroutine
-	double ti = get_time();
+	double ti = get_time(); // 记录开始时刻
 #ifdef DEBUG_LOG
 	fprintf(stderr, "PROFILE [%p] start\n", L);
 #endif
@@ -78,6 +79,7 @@ lstart(lua_State *L) {
 	return 0;
 }
 
+// 结束，并返回不包括挂起的总消耗时间
 static int
 lstop(lua_State *L) {
 	if (lua_gettop(L) != 0) {
@@ -113,30 +115,31 @@ lstop(lua_State *L) {
 	return 1;
 }
 
+//唤醒，记录开始的时刻
 static int
 timing_resume(lua_State *L) {
-	lua_pushvalue(L, -1);
-	lua_rawget(L, lua_upvalueindex(2));
-	if (lua_isnil(L, -1)) {		// check total time
+	lua_pushvalue(L, -1); //co副本2压栈
+	lua_rawget(L, lua_upvalueindex(2)); // check total time  (把t[k]的值压栈，t闭包第二个upvalue，k线程副本 push upvalue totaltime[coroutine]
+	if (lua_isnil(L, -1)) {		// check total time, 即checkprofile开关
 		lua_pop(L,2);	// pop from coroutine
 	} else {
-		lua_pop(L,1);
+		lua_pop(L,1); // total time出栈
 		double ti = get_time();
 #ifdef DEBUG_LOG
 		fprintf(stderr, "PROFILE [%p] resume %lf\n", lua_tothread(L, -1), ti);
 #endif
 		lua_pushnumber(L, ti);
-		lua_rawset(L, lua_upvalueindex(1));	// set start time
+		lua_rawset(L, lua_upvalueindex(1));	// set start time 压栈，供timing_yield difftime
 	}
 
-	lua_CFunction co_resume = lua_tocfunction(L, lua_upvalueindex(3));
+	lua_CFunction co_resume = lua_tocfunction(L, lua_upvalueindex(3)); // upvalue 3 c fun co_resume
 
 	return co_resume(L);
 }
 
 static int
 lresume(lua_State *L) {
-	lua_pushvalue(L,1);
+	lua_pushvalue(L,1); //co副本压栈
 	
 	return timing_resume(L);
 }
@@ -149,23 +152,24 @@ lresume_co(lua_State *L) {
 	return timing_resume(L);
 }
 
+//被挂起，累加清醒时用时(当前时刻减开始时刻)
 static int
 timing_yield(lua_State *L) {
 #ifdef DEBUG_LOG
 	lua_State *from = lua_tothread(L, -1);
 #endif
-	lua_pushvalue(L, -1);
-	lua_rawget(L, lua_upvalueindex(2));	// check total time
-	if (lua_isnil(L, -1)) {
-		lua_pop(L,2);
+	lua_pushvalue(L, -1); // 复制线程压栈
+	lua_rawget(L, lua_upvalueindex(2));	// check total time  (把t[k]的值压栈，t闭包第二个upvalue，k线程副本 push upvalue totaltime[coroutine]
+	if (lua_isnil(L, -1)) { // total time == nil, 即checkprofile开关
+		lua_pop(L,2); // 弹出线程2个副本
 	} else {
-		double ti = lua_tonumber(L, -1);
-		lua_pop(L,1);
+		double ti = lua_tonumber(L, -1); //total time
+		lua_pop(L,1); // 弹出线程
 
-		lua_pushvalue(L, -1);	// push coroutine
-		lua_rawget(L, lua_upvalueindex(1));
+		lua_pushvalue(L, -1);	// push coroutine  (线程副本2
+		lua_rawget(L, lua_upvalueindex(1)); // starttime  (push upvalue starttime[coroutine]
 		double starttime = lua_tonumber(L, -1);
-		lua_pop(L,1);
+		lua_pop(L,1); // 弹出线程副本1
 
 		double diff = diff_time(starttime);
 		ti += diff;
@@ -175,18 +179,18 @@ timing_yield(lua_State *L) {
 
 		lua_pushvalue(L, -1);	// push coroutine
 		lua_pushnumber(L, ti);
-		lua_rawset(L, lua_upvalueindex(2));
+		lua_rawset(L, lua_upvalueindex(2)); // upvalue totaltime[coroutine]=ti
 		lua_pop(L, 1);	// pop coroutine
 	}
 
-	lua_CFunction co_yield = lua_tocfunction(L, lua_upvalueindex(3));
+	lua_CFunction co_yield = lua_tocfunction(L, lua_upvalueindex(3)); // upvalue c fun co_yield
 
 	return co_yield(L);
 }
 
 static int
 lyield(lua_State *L) {
-	lua_pushthread(L);
+	lua_pushthread(L); // 把L表示的线程压栈
 
 	return timing_yield(L);
 }
@@ -216,31 +220,32 @@ luaopen_skynet_profile(lua_State *L) {
 	lua_newtable(L);	// table thread->total time
 
 	lua_newtable(L);	// weak table
-	lua_pushliteral(L, "kv");
-	lua_setfield(L, -2, "__mode");
+	lua_pushliteral(L, "kv"); // push string "kv"
+	lua_setfield(L, -2, "__mode"); // weaktable[__mode] = "kv""
 
-	lua_pushvalue(L, -1);
-	lua_setmetatable(L, -3); 
-	lua_setmetatable(L, -3);
+	lua_pushvalue(L, -1); // push "kv"
+	lua_setmetatable(L, -3); // pop weaktable setmetatable(totaltime, weaktable)
+	lua_setmetatable(L, -3); // pop totaltime setmetatable(starttime, totaltime)
 
 	lua_pushnil(L);	// cfunction (coroutine.resume or coroutine.yield)
-	luaL_setfuncs(L,l,3);
+	luaL_setfuncs(L,l,3); // reg functions in l
 
 	int libtable = lua_gettop(L);
 
 	lua_getglobal(L, "coroutine");
-	lua_getfield(L, -1, "resume");
+	lua_getfield(L, -1, "resume"); // push coroutine.resume
 
 	lua_CFunction co_resume = lua_tocfunction(L, -1);
 	if (co_resume == NULL)
 		return luaL_error(L, "Can't get coroutine.resume");
-	lua_pop(L,1);
+	lua_pop(L,1); // pop coroutine.resume
 
-	lua_getfield(L, libtable, "resume");
-	lua_pushcfunction(L, co_resume);
-	lua_setupvalue(L, -2, 3);
-	lua_pop(L,1);
+	lua_getfield(L, libtable, "resume"); // l.resume压栈
+	lua_pushcfunction(L, co_resume); // co_resume压栈
+	lua_setupvalue(L, -2, 3); // l.resume上引值3设为co_resume，并出栈
+	lua_pop(L,1); // l.resume出栈
 
+	//同上
 	lua_getfield(L, libtable, "resume_co");
 	lua_pushcfunction(L, co_resume);
 	lua_setupvalue(L, -2, 3);

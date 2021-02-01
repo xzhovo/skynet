@@ -25,6 +25,7 @@ local function preread(fd, str)
 					sz = sz - #str
 					local ret = readbytes(fd, sz)
 					if ret then
+						str = nil
 						return str .. ret
 					else
 						error(socket_error)

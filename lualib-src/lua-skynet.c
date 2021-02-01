@@ -66,13 +66,14 @@ _cb(struct skynet_context * context, void * ud, int type, int session, uint32_t 
 	}
 	lua_pushvalue(L,2);
 
+	//这里5个参数有顺序改变
 	lua_pushinteger(L, type);
 	lua_pushlightuserdata(L, (void *)msg);
 	lua_pushinteger(L,sz);
 	lua_pushinteger(L, session);
 	lua_pushinteger(L, source);
 
-	r = lua_pcall(L, 5, 0 , trace);
+	r = lua_pcall(L, 5, 0 , trace); //保护调用位置为1的fun，5参数，0返回
 
 	if (r == LUA_OK) {
 		return 0;
@@ -111,13 +112,13 @@ lcallback(lua_State *L) {
 	int forward = lua_toboolean(L, 2);
 	luaL_checktype(L,1,LUA_TFUNCTION);
 	lua_settop(L,1);
-	lua_rawsetp(L, LUA_REGISTRYINDEX, _cb);
+	lua_rawsetp(L, LUA_REGISTRYINDEX, _cb); //等价于 t[k] = v ， t 是指LUA_REGISTRYINDEX处的表， k 是指针 _cb 对应的轻量用户数据。 而 v 是栈顶的LUA_TFUNCTION。
 
-	lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD);
+	lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_MAINTHREAD); //把 t[LUA_RIDX_MAINTHREAD] 的值压栈， t 是指LUA_REGISTRYINDEX处的表
 	lua_State *gL = lua_tothread(L,-1);
 
 	if (forward) {
-		skynet_callback(context, gL, forward_cb);
+		skynet_callback(context, gL, forward_cb); //forward模式，不skynet_free
 	} else {
 		skynet_callback(context, gL, _cb);
 	}
@@ -183,8 +184,8 @@ lintcommand(lua_State *L) {
 	const char * parm = NULL;
 	char tmp[64];	// for integer parm
 	if (lua_gettop(L) == 2) {
-		if (lua_isnumber(L, 2)) {
-			int32_t n = (int32_t)luaL_checkinteger(L,2);
+		if (lua_isnumber(L, 2)) { // number转时间
+			int32_t n = (int32_t)luaL_checkinteger(L,2); //ti(0.01秒 
 			sprintf(tmp, "%d", n);
 			parm = tmp;
 		} else {
@@ -231,27 +232,27 @@ get_dest_string(lua_State *L, int index) {
 
 static int
 send_message(lua_State *L, int source, int idx_type) {
-	struct skynet_context * context = lua_touserdata(L, lua_upvalueindex(1));
-	uint32_t dest = (uint32_t)lua_tointeger(L, 1);
+	struct skynet_context * context = lua_touserdata(L, lua_upvalueindex(1)); //服务上下文
+	uint32_t dest = (uint32_t)lua_tointeger(L, 1); //服务地址
 	const char * dest_string = NULL;
 	if (dest == 0) {
 		if (lua_type(L,1) == LUA_TNUMBER) {
 			return luaL_error(L, "Invalid service address 0");
 		}
-		dest_string = get_dest_string(L, 1);
+		dest_string = get_dest_string(L, 1); //服务名
 	}
 
 	int type = luaL_checkinteger(L, idx_type+0);
 	int session = 0;
 	if (lua_isnil(L,idx_type+1)) {
-		type |= PTYPE_TAG_ALLOCSESSION;
+		type |= PTYPE_TAG_ALLOCSESSION; //+PTYPE_TAG_ALLOCSESSION (type 不同位段存不同信息，这样可以存很多小type
 	} else {
-		session = luaL_checkinteger(L,idx_type+1);
+		session = luaL_checkinteger(L,idx_type+1); //自带session 自带0即不回复
 	}
 
 	int mtype = lua_type(L,idx_type+2);
 	switch (mtype) {
-	case LUA_TSTRING: {
+	case LUA_TSTRING: { //单个参数
 		size_t len = 0;
 		void * msg = (void *)lua_tolstring(L,idx_type+2,&len);
 		if (len == 0) {
@@ -264,7 +265,7 @@ send_message(lua_State *L, int source, int idx_type) {
 		}
 		break;
 	}
-	case LUA_TLIGHTUSERDATA: {
+	case LUA_TLIGHTUSERDATA: { //多个参数
 		void * msg = lua_touserdata(L,idx_type+2);
 		int size = luaL_checkinteger(L,idx_type+3);
 		if (dest_string) {
@@ -285,7 +286,7 @@ send_message(lua_State *L, int source, int idx_type) {
 		}
 		// send to invalid address
 		// todo: maybe throw an error would be better
-		return 0;
+		return 0; // 报错时 0 个返回值，只能拿到 nil 
 	}
 	lua_pushinteger(L,session);
 	return 1;
@@ -443,7 +444,7 @@ ltrace(lua_State *L) {
 		lua_Debug d;
 		int index = 0;
 		do {
-			if (!lua_getstack(co, level, &d))
+			if (!lua_getstack(co, level, &d)) //解释器的运行时栈的信息,第level层调用
 				break;
 			lua_getinfo(co, "Sl", &d);
 			level++;
@@ -452,7 +453,7 @@ ltrace(lua_State *L) {
 			if (d.currentline >= 0)
 				++index;
 		} while (index < MAX_LEVEL);
-		switch (index) {
+		switch (index) { //至多3层
 		case 1:
 			skynet_error(context, "<TRACE %s> %" PRId64 " %s : %s:%d", tag, get_time(), user, si[0].source, si[0].line);
 			break;

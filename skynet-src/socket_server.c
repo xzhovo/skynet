@@ -91,14 +91,14 @@ struct socket {
 	struct wb_list low; // 低优先级发送队列
 	int64_t wb_size; // 发送字节大小
 	struct socket_stat stat; // 记录读写累计
-	volatile uint32_t sending; // sending 发送计数。针对 tcp 协议，每次投递发送指令前，都累加这个计数。在 socket 队列真的发送后，减去计数。direct write 只能在 sending 计数为 0 时才能工作。
+	ATOM_ULONG sending; // sending 发送计数。针对 tcp 协议，每次投递发送指令前，都累加这个计数。在 socket 队列真的发送后，减去计数。direct write 只能在 sending 计数为 0 时才能工作。
 	int fd;  // socket文件描述符
 	int id; // 位于socket_server的slot列表中的位置
 	uint8_t protocol; // tcp or udp
-	uint8_t type; // epoll事件触发时，会根据type来选择处理事件的逻辑
+	ATOM_BYTE type; // epoll事件触发时，会根据type来选择处理事件的逻辑
 	bool reading;
 	bool writing;
-	int udpconnecting;
+	ATOM_INT udpconnecting;
 	int64_t warn_size; // wb_size 预警值
 	union {
 		int size;
@@ -116,7 +116,7 @@ struct socket_server {
 	int sendctrl_fd; // 发送管道消息的文件描述
 	int checkctrl; // 判断是否有其他线程通过管道，向socket线程发送消息的标记变量
 	poll_fd event_fd; // epoll实例id
-	int alloc_id; // 已经分配的socket slot列表id
+	ATOM_INT alloc_id; // 已经分配的socket slot列表id
 	int event_n; // 标记本次epoll事件的数量
 	int event_index; // 下一个未处理的epoll事件索引
 	struct socket_object_interface soi; // for package sz == -1
@@ -276,6 +276,11 @@ socket_unlock(struct socket_lock *sl) {
 	}
 }
 
+static inline int
+socket_invalid(struct socket *s, int id) {
+	return (s->id != id || ATOM_LOAD(&s->type) == SOCKET_TYPE_INVALID);
+}
+
 static inline bool
 send_object_init(struct socket_server *ss, struct send_object *so, const void *object, size_t sz) {
 	if (sz == USEROBJECT) {
@@ -340,18 +345,19 @@ static int
 reserve_id(struct socket_server *ss) {
 	int i;
 	for (i=0;i<MAX_SOCKET;i++) {
-		int id = ATOM_INC(&(ss->alloc_id));
+		int id = ATOM_FINC(&(ss->alloc_id))+1;
 		if (id < 0) {
-			id = ATOM_AND(&(ss->alloc_id), 0x7fffffff); // 取距离 -0x7fffffff == 0
+			id = ATOM_FAND(&(ss->alloc_id), 0x7fffffff) & 0x7fffffff; // 取距离 -0x7fffffff == 0
 		}
 		struct socket *s = &ss->slot[HASH_ID(id)];
-		if (s->type == SOCKET_TYPE_INVALID) {
-			if (ATOM_CAS(&s->type, SOCKET_TYPE_INVALID, SOCKET_TYPE_RESERVE)) { // type 置为预定状态
+		unsigned char type_invalid = ATOM_LOAD(&s->type);
+		if (type_invalid == SOCKET_TYPE_INVALID) {
+			if (ATOM_CAS(&s->type, type_invalid, SOCKET_TYPE_RESERVE)) { // type 置为预定状态
 				s->id = id;
 				s->protocol = PROTOCOL_UNKNOWN;
 				// socket_server_udp_connect may inc s->udpconncting directly (from other thread, before new_fd), 
 				// so reset it to 0 here rather than in new_fd.
-				s->udpconnecting = 0;
+				ATOM_INIT(&s->udpconnecting, 0);
 				s->fd = -1;
 				return id;
 			} else {
@@ -401,12 +407,12 @@ socket_server_create(uint64_t time) {
 
 	for (i=0;i<MAX_SOCKET;i++) {
 		struct socket *s = &ss->slot[i];
-		s->type = SOCKET_TYPE_INVALID;
+		ATOM_INIT(&s->type, SOCKET_TYPE_INVALID);
 		clear_wb_list(&s->high);
 		clear_wb_list(&s->low);
 		spinlock_init(&s->dw_lock);
 	}
-	ss->alloc_id = 0;
+	ATOM_INIT(&ss->alloc_id , 0);
 	ss->event_n = 0;
 	ss->event_index = 0;
 	memset(&ss->soi, 0, sizeof(ss->soi));
@@ -475,20 +481,21 @@ force_close(struct socket_server *ss, struct socket *s, struct socket_lock *l, s
 	result->ud = 0;
 	result->data = NULL;
 	result->opaque = s->opaque;
-	if (s->type == SOCKET_TYPE_INVALID) {
+	uint8_t type = ATOM_LOAD(&s->type);
+	if (type == SOCKET_TYPE_INVALID) {
 		return;
 	}
-	assert(s->type != SOCKET_TYPE_RESERVE);
+	assert(type != SOCKET_TYPE_RESERVE);
 	free_wb_list(ss,&s->high);
 	free_wb_list(ss,&s->low);
 	sp_del(ss->event_fd, s->fd);
 	socket_lock(l);
-	if (s->type != SOCKET_TYPE_BIND) {
+	if (type != SOCKET_TYPE_BIND) {
 		if (close(s->fd) < 0) {
 			perror("close socket:");
 		}
 	}
-	s->type = SOCKET_TYPE_INVALID;
+	ATOM_STORE(&s->type, SOCKET_TYPE_INVALID);
 	if (s->dw_buffer) {
 		struct socket_sendbuffer tmp;
 		tmp.buffer = s->dw_buffer;
@@ -509,7 +516,7 @@ socket_server_release(struct socket_server *ss) {
 		struct socket *s = &ss->slot[i];
 		struct socket_lock l;
 		socket_lock_init(s, &l);
-		if (s->type != SOCKET_TYPE_RESERVE) {
+		if (ATOM_LOAD(&s->type) != SOCKET_TYPE_RESERVE) {
 			force_close(ss, s, &l, &dummy);
 		}
 		spinlock_destroy(&s->dw_lock);
@@ -547,10 +554,10 @@ enable_read(struct socket_server *ss, struct socket *s, bool enable) {
 static struct socket *
 new_fd(struct socket_server *ss, int id, int fd, int protocol, uintptr_t opaque, bool reading) {
 	struct socket * s = &ss->slot[HASH_ID(id)];
-	assert(s->type == SOCKET_TYPE_RESERVE);
+	assert(ATOM_LOAD(&s->type) == SOCKET_TYPE_RESERVE);
 
 	if (sp_add(ss->event_fd, fd, s)) { // add 监听 连接到达/有数据来临 事件
-		s->type = SOCKET_TYPE_INVALID;
+		ATOM_STORE(&s->type, SOCKET_TYPE_INVALID);
 		return NULL;
 	}
 
@@ -558,7 +565,7 @@ new_fd(struct socket_server *ss, int id, int fd, int protocol, uintptr_t opaque,
 	s->fd = fd;
 	s->reading = true;
 	s->writing = false;
-	s->sending = ID_TAG16(id) << 16 | 0;
+	ATOM_INIT(&s->sending , ID_TAG16(id) << 16 | 0);
 	s->protocol = protocol;
 	s->p.size = MIN_READ_BUFFER;
 	s->opaque = opaque;
@@ -570,7 +577,7 @@ new_fd(struct socket_server *ss, int id, int fd, int protocol, uintptr_t opaque,
 	s->dw_size = 0;
 	memset(&s->stat, 0, sizeof(s->stat));
 	if (enable_read(ss, s, reading)) {
-		s->type = SOCKET_TYPE_INVALID;
+		ATOM_STORE(&s->type , SOCKET_TYPE_INVALID);
 		return NULL;
 	}
 	return s;
@@ -643,7 +650,7 @@ open_socket(struct socket_server *ss, struct request_open * request, struct sock
 	}
 
 	if(status == 0) {
-		ns->type = SOCKET_TYPE_CONNECTED;
+		ATOM_STORE(&ns->type , SOCKET_TYPE_CONNECTED);
 		struct sockaddr * addr = ai_ptr->ai_addr;
 		void * sin_addr = (ai_ptr->ai_family == AF_INET) ? (void*)&((struct sockaddr_in *)addr)->sin_addr : (void*)&((struct sockaddr_in6 *)addr)->sin6_addr;
 		if (inet_ntop(ai_ptr->ai_family, sin_addr, ss->buffer, sizeof(ss->buffer))) {
@@ -652,7 +659,7 @@ open_socket(struct socket_server *ss, struct request_open * request, struct sock
 		freeaddrinfo( ai_list );
 		return SOCKET_OPEN;
 	} else {
-		ns->type = SOCKET_TYPE_CONNECTING;
+		ATOM_STORE(&ns->type , SOCKET_TYPE_CONNECTING);
 		if (enable_write(ss, ns, true)) {
 			result->data = "enable write failed";
 			goto _failed;
@@ -840,7 +847,7 @@ send_buffer_(struct socket_server *ss, struct socket *s, struct socket_lock *l, 
 		assert(send_buffer_empty(s) && s->wb_size == 0);
 		int err = enable_write(ss, s, false); // 修改可以接收数据了
 
-		if (s->type == SOCKET_TYPE_HALFCLOSE) { // 挥手，主动断开方不再发送带数据的报文，但还会接收报文
+		if (ATOM_LOAD(&s->type) == SOCKET_TYPE_HALFCLOSE) { // 挥手，主动断开方不再发送带数据的报文，但还会接收报文
 				force_close(ss, s, l, result);
 				return SOCKET_CLOSE;
 		}
@@ -938,7 +945,7 @@ static int
 trigger_write(struct socket_server *ss, struct request_send * request, struct socket_message *result) {
 	int id = request->id;
 	struct socket * s = &ss->slot[HASH_ID(id)];
-	if (s->type == SOCKET_TYPE_INVALID || s->id != id)
+	if (socket_invalid(s, id))
 		return -1;
 	if (enable_write(ss, s, true)) {
 		result->opaque = s->opaque;
@@ -963,18 +970,19 @@ send_socket(struct socket_server *ss, struct request_send * request, struct sock
 	struct socket * s = &ss->slot[HASH_ID(id)];
 	struct send_object so;
 	send_object_init(ss, &so, request->buffer, request->sz);
-	if (s->type == SOCKET_TYPE_INVALID || s->id != id 
-		|| s->type == SOCKET_TYPE_HALFCLOSE
-		|| s->type == SOCKET_TYPE_PACCEPT) {
+	uint8_t type = ATOM_LOAD(&s->type);
+	if (type == SOCKET_TYPE_INVALID || s->id != id
+		|| type == SOCKET_TYPE_HALFCLOSE
+		|| type == SOCKET_TYPE_PACCEPT) {
 		so.free_func((void *)request->buffer);
 		return -1;
 	}
-	if (s->type == SOCKET_TYPE_PLISTEN || s->type == SOCKET_TYPE_LISTEN) {
+	if (type == SOCKET_TYPE_PLISTEN || type == SOCKET_TYPE_LISTEN) {
 		skynet_error(NULL, "socket-server: write to listen fd %d.", id);
 		so.free_func((void *)request->buffer);
 		return -1;
 	}
-	if (send_buffer_empty(s) && s->type == SOCKET_TYPE_CONNECTED) {
+	if (send_buffer_empty(s) && type == SOCKET_TYPE_CONNECTED) {
 		if (s->protocol == PROTOCOL_TCP) {
 			append_sendbuffer(ss, s, request);	// add to high priority list, even priority == PRIORITY_LOW
 		} else {
@@ -1040,7 +1048,7 @@ listen_socket(struct socket_server *ss, struct request_listen * request, struct 
 	if (s == NULL) {
 		goto _failed;
 	}
-	s->type = SOCKET_TYPE_PLISTEN; // 等到 socket.start 才将监听 socket 纳入 epoll 的监管，所以在此之前，监听socket的状态是 SOCKET_TYPE_PLISTEN
+	ATOM_STORE(&s->type , SOCKET_TYPE_PLISTEN); // 等到 socket.start 才将监听 socket 纳入 epoll 的监管，所以在此之前，监听socket的状态是 SOCKET_TYPE_PLISTEN
 	return -1;
 _failed:
 	close(listen_fd);
@@ -1056,14 +1064,14 @@ _failed:
 static inline int
 nomore_sending_data(struct socket *s) {
 	// high 和 low 发送队列都为空；没有 direct write 的；sending 计数器为 0
-	return send_buffer_empty(s) && s->dw_buffer == NULL && (s->sending & 0xffff) == 0;
+	return send_buffer_empty(s) && s->dw_buffer == NULL && (ATOM_LOAD(&s->sending) & 0xffff) == 0;
 }
 
 static int
 close_socket(struct socket_server *ss, struct request_close *request, struct socket_message *result) {
 	int id = request->id;
 	struct socket * s = &ss->slot[HASH_ID(id)];
-	if (s->type == SOCKET_TYPE_INVALID || s->id != id) {
+	if (socket_invalid(s, id)) {
 		result->id = id;
 		result->opaque = request->opaque;
 		result->ud = 0;
@@ -1085,7 +1093,7 @@ close_socket(struct socket_server *ss, struct request_close *request, struct soc
 		result->opaque = request->opaque;
 		return SOCKET_CLOSE;
 	}
-	s->type = SOCKET_TYPE_HALFCLOSE;
+	ATOM_STORE(&s->type , SOCKET_TYPE_HALFCLOSE);
 	shutdown(s->fd, SHUT_RD);
 
 	return -1;
@@ -1103,7 +1111,7 @@ bind_socket(struct socket_server *ss, struct request_bind *request, struct socke
 		return SOCKET_ERR;
 	}
 	sp_nonblocking(request->fd);
-	s->type = SOCKET_TYPE_BIND;
+	ATOM_STORE(&s->type , SOCKET_TYPE_BIND);
 	result->data = "binding";
 	return SOCKET_OPEN;
 }
@@ -1117,7 +1125,7 @@ resume_socket(struct socket_server *ss, struct request_resumepause *request, str
 	result->ud = 0; // size
 	result->data = NULL; // msg
 	struct socket *s = &ss->slot[HASH_ID(id)];
-	if (s->type == SOCKET_TYPE_INVALID || s->id !=id) {
+	if (socket_invalid(s, id)) {
 		result->data = "invalid socket";
 		return SOCKET_ERR;
 	}
@@ -1127,12 +1135,13 @@ resume_socket(struct socket_server *ss, struct request_resumepause *request, str
 		result->data = "enable read failed";
 		return SOCKET_ERR;
 	}
-	if (s->type == SOCKET_TYPE_PACCEPT || s->type == SOCKET_TYPE_PLISTEN) {
-		s->type = (s->type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN;
+	uint8_t type = ATOM_LOAD(&s->type);
+	if (type == SOCKET_TYPE_PACCEPT || type == SOCKET_TYPE_PLISTEN) {
+		ATOM_STORE(&s->type , (type == SOCKET_TYPE_PACCEPT) ? SOCKET_TYPE_CONNECTED : SOCKET_TYPE_LISTEN);
 		s->opaque = request->opaque;
 		result->data = "start"; // listen 和 accept
 		return SOCKET_OPEN; //这个类型目前被忽略(同SKYNET_SOCKET_TYPE_CONNECT) lua-netpack.c:lfilter 
-	} else if (s->type == SOCKET_TYPE_CONNECTED) {
+	} else if (type == SOCKET_TYPE_CONNECTED) {
 		// todo: maybe we should send a message SOCKET_TRANSFER to s->opaque
 		s->opaque = request->opaque;
 		result->data = "transfer"; //forward
@@ -1146,7 +1155,7 @@ static int
 pause_socket(struct socket_server *ss, struct request_resumepause *request, struct socket_message *result) {
 	int id = request->id;
 	struct socket *s = &ss->slot[HASH_ID(id)];
-	if (s->type == SOCKET_TYPE_INVALID || s->id !=id) {
+	if (socket_invalid(s, id)) {
 		return -1;
 	}
 	if (enable_read(ss, s, false)) {
@@ -1163,7 +1172,7 @@ static void
 setopt_socket(struct socket_server *ss, struct request_setopt *request) {
 	int id = request->id;
 	struct socket *s = &ss->slot[HASH_ID(id)];
-	if (s->type == SOCKET_TYPE_INVALID || s->id !=id) {
+	if (socket_invalid(s, id)) {
 		return;
 	}
 	int v = request->value;
@@ -1216,7 +1225,7 @@ add_udp_socket(struct socket_server *ss, struct request_udp *udp) {
 		ss->slot[HASH_ID(id)].type = SOCKET_TYPE_INVALID;
 		return;
 	}
-	ns->type = SOCKET_TYPE_CONNECTED;
+	ATOM_STORE(&ns->type , SOCKET_TYPE_CONNECTED);
 	memset(ns->p.udp_address, 0, sizeof(ns->p.udp_address));
 }
 
@@ -1224,7 +1233,7 @@ static int
 set_udp_address(struct socket_server *ss, struct request_setudp *request, struct socket_message *result) {
 	int id = request->id;
 	struct socket *s = &ss->slot[HASH_ID(id)];
-	if (s->type == SOCKET_TYPE_INVALID || s->id !=id) {
+	if (socket_invalid(s, id)) {
 		return -1;
 	}
 	int type = request->address[0];
@@ -1242,7 +1251,7 @@ set_udp_address(struct socket_server *ss, struct request_setudp *request, struct
 	} else {
 		memcpy(s->p.udp_address, request->address, 1+2+16);	// 1 type, 2 port, 16 ipv6
 	}
-	ATOM_DEC(&s->udpconnecting);
+	ATOM_FDEC(&s->udpconnecting);
 	return -1;
 }
 
@@ -1254,7 +1263,7 @@ inc_sending_ref(struct socket *s, int id) {
 	if (s->protocol != PROTOCOL_TCP)
 		return;
 	for (;;) {
-		uint32_t sending = s->sending;
+		unsigned long sending = ATOM_LOAD(&s->sending);
 		if ((sending >> 16) == ID_TAG16(id)) {
 			if ((sending & 0xffff) == 0xffff) {
 				// s->sending may overflow (rarely), so busy waiting here for socket thread dec it. see issue #794
@@ -1276,8 +1285,8 @@ dec_sending_ref(struct socket_server *ss, int id) {
 	struct socket * s = &ss->slot[HASH_ID(id)];
 	// Notice: udp may inc sending while type == SOCKET_TYPE_RESERVE
 	if (s->id == id && s->protocol == PROTOCOL_TCP) {
-		assert((s->sending & 0xffff) != 0);
-		ATOM_DEC(&s->sending);
+		assert((ATOM_LOAD(&s->sending) & 0xffff) != 0);
+		ATOM_FDEC(&s->sending);
 	}
 }
 
@@ -1370,13 +1379,13 @@ forward_message_tcp(struct socket_server *ss, struct socket *s, struct socket_lo
 			force_close(ss,s,l,result); 
 			return SOCKET_CLOSE;
 		} else { 
-			s->type = SOCKET_TYPE_HALFCLOSE;
+			ATOM_STORE(&s->type , SOCKET_TYPE_HALFCLOSE);
 			shutdown(s->fd, SHUT_RD);
 			return -1; 
 		}
 	}
 
-	if (s->type == SOCKET_TYPE_HALFCLOSE) {
+	if (ATOM_LOAD(&s->type) == SOCKET_TYPE_HALFCLOSE) {
 		// discard recv data
 		FREE(buffer);
 		return -1;
@@ -1470,7 +1479,7 @@ report_connect(struct socket_server *ss, struct socket *s, struct socket_lock *l
 			result->data = strerror(errno);
 		return SOCKET_ERR;
 	} else {
-		s->type = SOCKET_TYPE_CONNECTED;
+		ATOM_STORE(&s->type , SOCKET_TYPE_CONNECTED);
 		result->opaque = s->opaque;
 		result->id = s->id;
 		result->ud = 0;
@@ -1541,7 +1550,7 @@ report_accept(struct socket_server *ss, struct socket *s, struct socket_message 
 	// accept new one connection
 	stat_read(ss,s,1);
 
-	ns->type = SOCKET_TYPE_PACCEPT;
+	ATOM_STORE(&ns->type , SOCKET_TYPE_PACCEPT);
 	result->opaque = s->opaque;
 	result->id = s->id;
 	result->ud = id;
@@ -1563,7 +1572,7 @@ clear_closed_event(struct socket_server *ss, struct socket_message * result, int
 			struct event *e = &ss->ev[i];
 			struct socket *s = e->s;
 			if (s) {
-				if (s->type == SOCKET_TYPE_INVALID && s->id == id) {
+				if (socket_invalid(s, id)) {
 					e->s = NULL;
 					break;
 				}
@@ -1611,7 +1620,7 @@ socket_server_poll(struct socket_server *ss, struct socket_message * result, int
 		}
 		struct socket_lock l;
 		socket_lock_init(s, &l);
-		switch (s->type) {
+		switch (ATOM_LOAD(&s->type)) {
 		case SOCKET_TYPE_CONNECTING:
 			return report_connect(ss, s, &l, result);
 		case SOCKET_TYPE_LISTEN: {
@@ -1732,7 +1741,7 @@ socket_server_connect(struct socket_server *ss, uintptr_t opaque, const char * a
 static inline int
 can_direct_write(struct socket *s, int id) {
 	// id 验证；没有未发完的包；已连接；不是 udp
-	return s->id == id && nomore_sending_data(s) && s->type == SOCKET_TYPE_CONNECTED && s->udpconnecting == 0;
+	return s->id == id && nomore_sending_data(s) && ATOM_LOAD(&s->type) == SOCKET_TYPE_CONNECTED && ATOM_LOAD(&s->udpconnecting) == 0;
 }
 
 // worker 线程消息驱动 lua socket.write -> lua-socket.c:lsend -> skynet_socket.c:skynet_socket_send
@@ -1744,7 +1753,7 @@ int
 socket_server_send(struct socket_server *ss, struct socket_sendbuffer *buf) {
 	int id = buf->id;
 	struct socket * s = &ss->slot[HASH_ID(id)];
-	if (s->id != id || s->type == SOCKET_TYPE_INVALID) { //非法或无效
+	if (socket_invalid(s, id)) { //非法或无效
 		free_buffer(ss, buf);
 		return -1;
 	}
@@ -1833,7 +1842,7 @@ socket_server_send_lowpriority(struct socket_server *ss, struct socket_sendbuffe
 	int id = buf->id;
 
 	struct socket * s = &ss->slot[HASH_ID(id)];
-	if (s->id != id || s->type == SOCKET_TYPE_INVALID) {
+	if (socket_invalid(s, id)) {
 		free_buffer(ss, buf);
 		return -1;
 	}
@@ -2040,7 +2049,7 @@ int
 socket_server_udp_send(struct socket_server *ss, const struct socket_udp_address *addr, struct socket_sendbuffer *buf) {
 	int id = buf->id;
 	struct socket * s = &ss->slot[HASH_ID(id)];
-	if (s->id != id || s->type == SOCKET_TYPE_INVALID) {
+	if (socket_invalid(s, id)) {
 		free_buffer(ss, buf);
 		return -1;
 	}
@@ -2101,17 +2110,17 @@ socket_server_udp_send(struct socket_server *ss, const struct socket_udp_address
 int
 socket_server_udp_connect(struct socket_server *ss, int id, const char * addr, int port) {
 	struct socket * s = &ss->slot[HASH_ID(id)];
-	if (s->id != id || s->type == SOCKET_TYPE_INVALID) {
+	if (socket_invalid(s, id)) {
 		return -1;
 	}
 	struct socket_lock l;
 	socket_lock_init(s, &l);
 	socket_lock(&l);
-	if (s->id != id || s->type == SOCKET_TYPE_INVALID) {
+	if (socket_invalid(s, id)) {
 		socket_unlock(&l);
 		return -1;
 	}
-	ATOM_INC(&s->udpconnecting);
+	ATOM_FINC(&s->udpconnecting);
 	socket_unlock(&l);
 
 	int status;
@@ -2189,7 +2198,7 @@ static int
 query_info(struct socket *s, struct socket_info *si) {
 	union sockaddr_all u;
 	socklen_t slen = sizeof(u);
-	switch (s->type) {
+	switch (ATOM_LOAD(&s->type)) {
 	case SOCKET_TYPE_BIND:
 		si->type = SOCKET_INFO_BIND;
 		si->name[0] = '\0';

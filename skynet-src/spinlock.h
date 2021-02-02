@@ -8,32 +8,50 @@
 
 #ifndef USE_PTHREAD_LOCK
 
-// è‡ªæ—‹é”ï¼ˆspinlockï¼‰
-// æ¦‚å¿µï¼šè‡ªæ—‹é”ï¼Œä¸€æ¡çº¿ç¨‹åŠ é”é”ä½ä¸´ç•ŒåŒºï¼Œå¦ä¸€æ¡çº¿ç¨‹å°è¯•è®¿é—®è¯¥ä¸´ç•ŒåŒºçš„æ—¶å€™ï¼Œä¼šå‘ç”Ÿé˜»å¡žï¼Œä½†æ˜¯ä¸ä¼šè¿›å…¥ä¼‘çœ çŠ¶æ€ï¼Œå¹¶ä¸”ä¸æ–­è½®è¯¢è¯¥é”ï¼Œç›´è‡³åŽŸæ¥é”ä½ä¸´ç•ŒåŒºçš„çº¿ç¨‹è§£é”ã€‚
-// å…·ä½“è¯´æ˜Žï¼šå‡è®¾ä¸€å°æœºå™¨ä¸Šæœ‰ä¸¤ä¸ªæ ¸å¿ƒcore0å’Œcore1ï¼ŒçŽ°åœ¨æœ‰çº¿ç¨‹Aã€Bã€Cï¼Œæ­¤æ—¶core0è¿è¡Œçº¿ç¨‹Aï¼Œcore1è¿è¡Œçº¿ç¨‹Bï¼Œæ­¤æ—¶çº¿ç¨‹Bè°ƒç”¨spin locké”ä½ä¸´ç•ŒåŒºï¼Œå½“çº¿ç¨‹Aå°è¯•è®¿é—®è¯¥ä¸´ç•ŒåŒºæ—¶ï¼Œå› ä¸ºBå·²ç»åŠ é”ï¼Œæ­¤æ—¶çº¿ç¨‹Aä¼šé˜»å¡žï¼Œå¹¶ä¸”ä¸æ–­è½®è¯¢è¯¥é”ï¼Œä¸ä¼šäº¤å‡ºcore0çš„ä½¿ç”¨æƒï¼Œå½“çº¿ç¨‹Bé‡Šæ”¾é”æ—¶ï¼ŒAå¼€å§‹æ‰§è¡Œä¸´ç•ŒåŒºé€»è¾‘
+// ×ÔÐýËø£¨spinlock£©
+// ¸ÅÄî£º×ÔÐýËø£¬Ò»ÌõÏß³Ì¼ÓËøËø×¡ÁÙ½çÇø£¬ÁíÒ»ÌõÏß³Ì³¢ÊÔ·ÃÎÊ¸ÃÁÙ½çÇøµÄÊ±ºò£¬»á·¢Éú×èÈû£¬µ«ÊÇ²»»á½øÈëÐÝÃß×´Ì¬£¬²¢ÇÒ²»¶ÏÂÖÑ¯¸ÃËø£¬Ö±ÖÁÔ­À´Ëø×¡ÁÙ½çÇøµÄÏß³Ì½âËø¡£
+// ¾ßÌåËµÃ÷£º¼ÙÉèÒ»Ì¨»úÆ÷ÉÏÓÐÁ½¸öºËÐÄcore0ºÍcore1£¬ÏÖÔÚÓÐÏß³ÌA¡¢B¡¢C£¬´ËÊ±core0ÔËÐÐÏß³ÌA£¬core1ÔËÐÐÏß³ÌB£¬´ËÊ±Ïß³ÌBµ÷ÓÃspin lockËø×¡ÁÙ½çÇø£¬µ±Ïß³ÌA³¢ÊÔ·ÃÎÊ¸ÃÁÙ½çÇøÊ±£¬ÒòÎªBÒÑ¾­¼ÓËø£¬´ËÊ±Ïß³ÌA»á×èÈû£¬²¢ÇÒ²»¶ÏÂÖÑ¯¸ÃËø£¬²»»á½»³öcore0µÄÊ¹ÓÃÈ¨£¬µ±Ïß³ÌBÊÍ·ÅËøÊ±£¬A¿ªÊ¼Ö´ÐÐÁÙ½çÇøÂß¼­
+
+#ifdef __STDC_NO_ATOMICS__
+
+#define atomic_flag_ int
+#define ATOMIC_FLAG_INIT_ 0
+#define atomic_flag_test_and_set_(ptr) __sync_lock_test_and_set(ptr, 1)
+#define atomic_flag_clear_(ptr) __sync_lock_release(ptr)
+
+#else
+
+#include <stdatomic.h>
+#define atomic_flag_ atomic_flag
+#define ATOMIC_FLAG_INIT_ ATOMIC_FLAG_INIT
+#define atomic_flag_test_and_set_ atomic_flag_test_and_set
+#define atomic_flag_clear_ atomic_flag_clear
+
+#endif
 
 struct spinlock {
-	int lock;
+	atomic_flag_ lock;
 };
 
 static inline void
 spinlock_init(struct spinlock *lock) {
-	lock->lock = 0;
+	atomic_flag_ v = ATOMIC_FLAG_INIT_;
+	lock->lock = v;
 }
 
 static inline void
-spinlock_lock(struct spinlock *lock) { //è‡ªæ—‹
-	while (__sync_lock_test_and_set(&lock->lock,1)) {}
+spinlock_lock(struct spinlock *lock) { //×ÔÐý
+	while (atomic_flag_test_and_set_(&lock->lock)) {}
 }
 
 static inline int
 spinlock_trylock(struct spinlock *lock) {
-	return __sync_lock_test_and_set(&lock->lock,1) == 0;
+	return atomic_flag_test_and_set_(&lock->lock) == 0;
 }
 
 static inline void
 spinlock_unlock(struct spinlock *lock) {
-	__sync_lock_release(&lock->lock);
+	atomic_flag_clear_(&lock->lock);
 }
 
 static inline void
@@ -41,14 +59,14 @@ spinlock_destroy(struct spinlock *lock) {
 	(void) lock;
 }
 
-#else //äº’æ–¥é”
+#else //»¥³âËø
 
 #include <pthread.h>
 
 
-// äº’æ–¥é”ï¼ˆmutex lock : mutual exclusion lockï¼‰
-// æ¦‚å¿µï¼šäº’æ–¥é”ï¼Œä¸€æ¡çº¿ç¨‹åŠ é”é”ä½ä¸´ç•ŒåŒºï¼Œå¦ä¸€æ¡çº¿ç¨‹å°è¯•è®¿é—®æ”¹ä¸´ç•ŒåŒºçš„æ—¶å€™ï¼Œä¼šå‘ç”Ÿé˜»å¡žï¼Œå¹¶è¿›å…¥ä¼‘çœ çŠ¶æ€ã€‚ä¸´ç•ŒåŒºæ˜¯é”lockå’Œunlockä¹‹é—´çš„ä»£ç ç‰‡æ®µï¼Œä¸€èˆ¬æ˜¯å¤šæ¡çº¿ç¨‹èƒ½å¤Ÿå…±åŒè®¿é—®çš„éƒ¨åˆ†ã€‚
-// å…·ä½“è¯´æ˜Žï¼šå‡è®¾ä¸€å°æœºå™¨ä¸Šçš„cpuæœ‰ä¸¤ä¸ªæ ¸å¿ƒcore0å’Œcore1ï¼ŒçŽ°åœ¨æœ‰çº¿ç¨‹Aã€Bã€Cï¼Œæ­¤æ—¶core0è¿è¡Œçº¿ç¨‹Aï¼Œcore1è¿è¡Œçº¿ç¨‹Bï¼Œæ­¤æ—¶çº¿ç¨‹Bä½¿ç”¨Mutexé”ï¼Œé”ä½ä¸€ä¸ªä¸´ç•ŒåŒºï¼Œå½“çº¿ç¨‹Aè¯•å›¾è®¿é—®è¯¥ä¸´ç•ŒåŒºæ—¶ï¼Œå› ä¸ºçº¿ç¨‹Bå·²ç»å°†å…¶é”ä½ï¼Œå› æ­¤çº¿ç¨‹Aè¢«æŒ‚èµ·ï¼Œè¿›å…¥ä¼‘çœ çŠ¶æ€ï¼Œæ­¤æ—¶core0è¿›è¡Œä¸Šä¸‹æ–‡åˆ‡æ¢ï¼Œå°†çº¿ç¨‹Aæ”¾å…¥ä¼‘çœ é˜Ÿåˆ—ä¸­ï¼Œç„¶åŽcore0è¿è¡Œçº¿ç¨‹Cï¼Œå½“çº¿ç¨‹Bå®Œæˆä¸´ç•ŒåŒºçš„æµç¨‹å¹¶æ‰§è¡Œè§£é”ä¹‹åŽï¼Œçº¿ç¨‹Aåˆä¼šè¢«å”¤é†’ï¼Œcore0é‡æ–°è¿è¡Œçº¿ç¨‹A
+// »¥³âËø£¨mutex lock : mutual exclusion lock£©
+// ¸ÅÄî£º»¥³âËø£¬Ò»ÌõÏß³Ì¼ÓËøËø×¡ÁÙ½çÇø£¬ÁíÒ»ÌõÏß³Ì³¢ÊÔ·ÃÎÊ¸ÄÁÙ½çÇøµÄÊ±ºò£¬»á·¢Éú×èÈû£¬²¢½øÈëÐÝÃß×´Ì¬¡£ÁÙ½çÇøÊÇËølockºÍunlockÖ®¼äµÄ´úÂëÆ¬¶Î£¬Ò»°ãÊÇ¶àÌõÏß³ÌÄÜ¹»¹²Í¬·ÃÎÊµÄ²¿·Ö¡£
+// ¾ßÌåËµÃ÷£º¼ÙÉèÒ»Ì¨»úÆ÷ÉÏµÄcpuÓÐÁ½¸öºËÐÄcore0ºÍcore1£¬ÏÖÔÚÓÐÏß³ÌA¡¢B¡¢C£¬´ËÊ±core0ÔËÐÐÏß³ÌA£¬core1ÔËÐÐÏß³ÌB£¬´ËÊ±Ïß³ÌBÊ¹ÓÃMutexËø£¬Ëø×¡Ò»¸öÁÙ½çÇø£¬µ±Ïß³ÌAÊÔÍ¼·ÃÎÊ¸ÃÁÙ½çÇøÊ±£¬ÒòÎªÏß³ÌBÒÑ¾­½«ÆäËø×¡£¬Òò´ËÏß³ÌA±»¹ÒÆð£¬½øÈëÐÝÃß×´Ì¬£¬´ËÊ±core0½øÐÐÉÏÏÂÎÄÇÐ»»£¬½«Ïß³ÌA·ÅÈëÐÝÃß¶ÓÁÐÖÐ£¬È»ºócore0ÔËÐÐÏß³ÌC£¬µ±Ïß³ÌBÍê³ÉÁÙ½çÇøµÄÁ÷³Ì²¢Ö´ÐÐ½âËøÖ®ºó£¬Ïß³ÌAÓÖ»á±»»½ÐÑ£¬core0ÖØÐÂÔËÐÐÏß³ÌA
 // 
 // we use mutex instead of spinlock for some reason
 // you can also replace to pthread_spinlock

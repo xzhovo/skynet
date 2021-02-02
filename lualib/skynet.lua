@@ -1,5 +1,6 @@
 -- "skynet.core" lua-skynet.c
 local c = require "skynet.core"
+local skynet_require = require "skynet.require"
 local tostring = tostring
 local coroutine = coroutine
 local assert = assert
@@ -66,7 +67,7 @@ local sleep_session = {} --睡眠的会话 key协程value会话
 
 local watching_session = {} --call阻塞后监视的session对目的服务地址，0时遍历找服务
 local error_queue = {} --错误队列
-local fork_queue = {} --skynet.fork用来交出CPU的协程队列 == timeout(0, fun)
+local fork_queue = { h = 1, t = 0 } --skynet.fork用来交出CPU的协程队列 == timeout(0, fun)
 
 do ---- request/select
 	local function send_requests(self)
@@ -438,9 +439,12 @@ function skynet.killthread(thread)
 			end
 		end
 	else
-		for i = 1, #fork_queue do
+		local t = fork_queue.t
+		for i = fork_queue.h, t do
 			if fork_queue[i] == thread then
-				tremove(fork_queue, i)
+				table.move(fork_queue, i+1, t, i)
+				fork_queue[t] = nil
+				fork_queue.t = t - 1
 				return thread
 			end
 		end
@@ -540,7 +544,7 @@ end
 
 --退出服务
 function skynet.exit()
-	fork_queue = {}	-- no fork coroutine can be execute after skynet.exit
+	fork_queue = { h = 1, t = 0 }	-- no fork coroutine can be execute after skynet.exit
 	skynet.send(".launcher","lua","REMOVE",skynet.self(), false)
 	-- report the sources that call me
 	for co, session in pairs(session_coroutine_id) do
@@ -550,7 +554,7 @@ function skynet.exit()
 		end
 	end
 	for session, co in pairs(session_id_coroutine) do --延迟回应的直接回应false
-		if type(co) == "thread" then
+		if type(co) == "thread" and co ~= running_thread then
 			coroutine.close(co)
 		end
 	end
@@ -802,7 +806,9 @@ function skynet.fork(func,...)
 		local args = { ... }
 		co = co_create(function() func(table.unpack(args,1,n)) end) --带参
 	end
-	tinsert(fork_queue, co)
+	local t = fork_queue.t + 1
+	fork_queue.t = t
+	fork_queue[t] = co
 	return co
 end
 
@@ -875,11 +881,20 @@ end
 function skynet.dispatch_message(...)
 	local succ, err = pcall(raw_dispatch_message,...)
 	while true do --有消息就处理skynet.fork的fork_queue所有
-		local co = tremove(fork_queue,1)
-		if co == nil then
+		if fork_queue.h > fork_queue.t then
+			-- queue is empty
+			fork_queue.h = 1
+			fork_queue.t = 0
 			break
 		end
 		local fork_succ, fork_err = pcall(suspend,co,coroutine_resume(co)) --唤醒继续处理，谢谢你交出CPU，挂起第一个阻塞，也就是说 fork 的 func 不一定走完
+		-- pop queue
+		local h = fork_queue.h
+		local co = fork_queue[h]
+		fork_queue[h] = nil
+		fork_queue.h = h + 1
+
+		local fork_succ, fork_err = pcall(suspend,co,coroutine_resume(co))
 		if not fork_succ then
 			if succ then
 				succ = false
@@ -976,52 +991,18 @@ do
 	}
 end
 
-local init_func = {}
+skynet.init = skynet_require.init
+-- skynet.pcall is deprecated, use pcall directly
+skynet.pcall = pcall
 
 --服务初始化 
 --这通常用于 lua 库的编写。你需要编写的服务引用你的库的时候，事先调用一些 skynet 阻塞 API ，就可以用 skynet.init 把这些工作注册在 start 之前。
-function skynet.init(f, name)
-	assert(type(f) == "function")
-	if init_func == nil then
-		f()
-	else
-		tinsert(init_func, f)
-		if name then
-			assert(type(name) == "string")
-			assert(init_func[name] == nil)
-			init_func[name] = f
-		end
-	end
-end
-
-local function init_all()
-	local funcs = init_func
-	init_func = nil
-	if funcs then
-		for _,f in ipairs(funcs) do
-			f()
-		end
-	end
-end
-
-local function ret(f, ...)
-	f()
-	return ...
-end
-
-local function init_template(start, ...)
-	init_all()
-	init_func = {}
-	return ret(init_all, start(...))
-end
-
---预先init，在调用
-function skynet.pcall(start, ...)
-	return xpcall(init_template, traceback, start, ...)
-end
-
 function skynet.init_service(start)
-	local ok, err = skynet.pcall(start)
+	local function main()
+		skynet_require.init_all()
+		start()
+	end
+	local ok, err = xpcall(main, traceback)
 	if not ok then
 		skynet.error("init service failed: " .. tostring(err))
 		skynet.send(".launcher","lua", "ERROR")

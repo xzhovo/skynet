@@ -97,6 +97,6 @@ local function init()
 	}
 end
 
-skynet.init(init, "multicast")
+skynet.init(init)
 
 return multicast

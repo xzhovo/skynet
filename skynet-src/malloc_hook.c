@@ -15,8 +15,8 @@
 #define MEMORY_ALLOCTAG 0x20140605
 #define MEMORY_FREETAG 0x0badf00d
 
-static size_t _used_memory = 0;
-static size_t _memory_block = 0;
+static ATOM_SIZET _used_memory = 0;
+static ATOM_SIZET _memory_block = 0;
 
 struct mem_data {
 	uint32_t handle;
@@ -46,7 +46,7 @@ static struct mem_data mem_stats[SLOT_SIZE];
 
 static ssize_t*
 get_allocated_field(uint32_t handle) {
-	int h = (int)(handle & (SLOT_SIZE - 1)); //获得最后5位
+	int h = (int)(handle & (SLOT_SIZE - 1)); //������5λ
 	struct mem_data *data = &mem_stats[h];
 	uint32_t old_handle = data->handle;
 	ssize_t old_alloc = data->allocated;
@@ -65,32 +65,32 @@ get_allocated_field(uint32_t handle) {
 	return &data->allocated;
 }
 
-//内存分配更新状态
+//�ڴ�������״̬
 inline static void
 update_xmalloc_stat_alloc(uint32_t handle, size_t __n) {
-	ATOM_ADD(&_used_memory, __n); //总内存增加
-	ATOM_INC(&_memory_block); //块数增加
-	ssize_t* allocated = get_allocated_field(handle); //对应mem_stats已分配大小
+	ATOM_FADD(&_used_memory, __n); //���ڴ�����
+	ATOM_FINC(&_memory_block); //��������
+	ssize_t* allocated = get_allocated_field(handle); //��Ӧmem_stats�ѷ����С
 	if(allocated) {
-		ATOM_ADD(allocated, __n); //增加
+		ATOM_FADD(allocated, __n); //����
 	}
 }
 
-//内存释放更新状态
+//�ڴ��ͷŸ���״̬
 inline static void
 update_xmalloc_stat_free(uint32_t handle, size_t __n) {
-	ATOM_SUB(&_used_memory, __n);
-	ATOM_DEC(&_memory_block);
+	ATOM_FSUB(&_used_memory, __n);
+	ATOM_FDEC(&_memory_block);
 	ssize_t* allocated = get_allocated_field(handle);
 	if(allocated) {
-		ATOM_SUB(allocated, __n);
+		ATOM_FSUB(allocated, __n);
 	}
 }
 
 inline static void*
 fill_prefix(char* ptr) {
-	uint32_t handle = skynet_current_handle(); //服务handle，或负的线程号
-	size_t size = je_malloc_usable_size(ptr); //可用空间
+	uint32_t handle = skynet_current_handle(); //����handle���򸺵��̺߳�
+	size_t size = je_malloc_usable_size(ptr); //���ÿռ�
 	struct mem_cookie *p = (struct mem_cookie *)(ptr + size - sizeof(struct mem_cookie));
 	memcpy(&p->handle, &handle, sizeof(handle));
 #ifdef MEMORY_CHECK
@@ -104,14 +104,14 @@ fill_prefix(char* ptr) {
 //Jemalloc https://blog.csdn.net/xumaojun/article/details/82910186
 inline static void*
 clean_prefix(char* ptr) {
-	size_t size = je_malloc_usable_size(ptr); //可用空间
-	struct mem_cookie *p = (struct mem_cookie *)(ptr + size - sizeof(struct mem_cookie)); //取出mem_cookie
+	size_t size = je_malloc_usable_size(ptr); //���ÿռ�
+	struct mem_cookie *p = (struct mem_cookie *)(ptr + size - sizeof(struct mem_cookie)); //ȡ��mem_cookie
 	uint32_t handle;
 	memcpy(&handle, &p->handle, sizeof(handle));
 #ifdef MEMORY_CHECK
 	uint32_t dogtag;
 	memcpy(&dogtag, &p->dogtag, sizeof(dogtag));
-	if (dogtag == MEMORY_FREETAG) { //已经释放过了
+	if (dogtag == MEMORY_FREETAG) { //�Ѿ��ͷŹ���
 		fprintf(stderr, "xmalloc: double free in :%08x\n", handle);
 	}
 	assert(dogtag == MEMORY_ALLOCTAG);	// memory out of bounds
@@ -189,7 +189,7 @@ mallctl_opt(const char* name, int* newval) {
 void *
 skynet_malloc(size_t size) {
 	void* ptr = je_malloc(size + PREFIX_SIZE);
-	if(!ptr) malloc_oom(size); //超出
+	if(!ptr) malloc_oom(size); //����
 	return fill_prefix(ptr);
 }
 
@@ -206,8 +206,8 @@ skynet_realloc(void *ptr, size_t size) {
 void
 skynet_free(void *ptr) {
 	if (ptr == NULL) return;
-	void* rawptr = clean_prefix(ptr); //清理usable头部
-	je_free(rawptr); //完全释放
+	void* rawptr = clean_prefix(ptr); //����usableͷ��
+	je_free(rawptr); //��ȫ�ͷ�
 }
 
 void *
@@ -278,12 +278,12 @@ mallctl_cmd(const char* name) {
 
 size_t
 malloc_used_memory(void) {
-	return _used_memory;
+	return ATOM_LOAD(&_used_memory);
 }
 
 size_t
 malloc_memory_block(void) {
-	return _memory_block;
+	return ATOM_LOAD(&_memory_block);
 }
 
 void
@@ -301,7 +301,7 @@ dump_c_mem() {
 	skynet_error(NULL, "+total: %zdkb",total >> 10);
 }
 
-//字符串拷贝返回
+//�ַ�����������
 char *
 skynet_strdup(const char *str) {
 	size_t sz = strlen(str);
@@ -320,11 +320,11 @@ skynet_lalloc(void *ptr, size_t osize, size_t nsize) {
 	}
 }
 
-//列出所有C内存，由主线程内存(包括非独立的所有)；子线程内存(当前有socket)；单独区分开的C服务内存(其中同类第一个服务包括缓存的lua文件和消息内存，其他服务只有消息内存)
+//�г�����C�ڴ棬�����߳��ڴ�(�����Ƕ���������)�����߳��ڴ�(��ǰ��socket)���������ֿ���C�����ڴ�(����ͬ���һ��������������lua�ļ�����Ϣ�ڴ棬��������ֻ����Ϣ�ڴ�)
 //----
-//cmem 严格意义上讲是指该服务分配出来的内存，而服务退出并不意味着它分配出来的内存一定释放。
-//例如：发送出去的消息，需要等接收方释放。lua require 的 dll 可能不会随着 vm 调 dlclose 即时释放干净等等。此类情况还有一些，很难一一枚举。如果你感兴趣，可以在源码里多加一些 log 追踪。
-//ps. 除了 code cache 外 skynet 的 lua vm 还会保留头几千个字符串常量，超过一定量才释放额外字符串。
+//cmem �ϸ������Ͻ���ָ�÷������������ڴ棬�������˳�������ζ��������������ڴ�һ���ͷš�
+//���磺���ͳ�ȥ����Ϣ����Ҫ�Ƚ��շ��ͷš�lua require �� dll ���ܲ������� vm �� dlclose ��ʱ�ͷŸɾ��ȵȡ������������һЩ������һһö�١���������Ȥ��������Դ������һЩ log ׷�١�
+//ps. ���� code cache �� skynet �� lua vm ���ᱣ��ͷ��ǧ���ַ�������������һ�������ͷŶ����ַ�����
 int
 dump_mem_lua(lua_State *L) {
 	int i;

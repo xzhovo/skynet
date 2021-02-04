@@ -8,10 +8,10 @@ local httpd = require "http.httpd"
 local sockethelper = require "http.sockethelper"
 
 local arg = table.pack(...)
-assert(arg.n <= 2)
-local ip = (arg.n == 2 and arg[1] or "127.0.0.1")
-local port = tonumber(arg[arg.n])
-local TIMEOUT = 300 -- 3 sec
+assert(arg.n <= 3)
+local ip = arg[3] or "127.0.0.1"
+local port = tonumber(arg[1])
+local myMonitor = arg[2]
 
 local COMMAND = {}
 local COMMANDX = {}
@@ -70,13 +70,12 @@ local function docmd(cmdline, print, fd)
 			split[1] = cmdline
 			ok, list = pcall(cmd, split)
 		else
-			local my_monitor = skynet.getenv "my_monitor"
-			if my_monitor then
-				ok, list = skynet.call(my_monitor, "lua", command, table.unpack(split,2))
+			if myMonitor then
+				ok, list = skynet.lcall(myMonitor, command, table.unpack(split,2))
 			end
-            if not ok then
-                print("Invalid command, type help for command list")
-            end
+		end
+		if not ok then
+			print("Invalid command, type help for command list")
 		end
 	end
 

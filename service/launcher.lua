@@ -1,4 +1,4 @@
---·şÎñÆô¶¯Æ÷£¬¹ÜÀíËùÓĞ·şÎñµÄÆô¶¯ºÍ¹Ø±Õ
+--æœåŠ¡å¯åŠ¨å™¨ï¼Œç®¡ç†æ‰€æœ‰æœåŠ¡çš„å¯åŠ¨å’Œå…³é—­
 local skynet = require "skynet"
 local core = require "skynet.core"
 require "skynet.manager"	-- import manager apis
@@ -39,8 +39,6 @@ local function list_srv(ti, fmt_func, ...)
 			list[skynet.address(addr)] = fmt_func(stat, addr)
 		else
 			list[skynet.address(addr)] = fmt_func("ERROR", addr)
-		else
-			stat.xname = tostring(v)
 		end
 		sessions[req] = nil
 	end
@@ -68,7 +66,6 @@ function command.MEM(addr, ti)
 			return string.format("%s (%s)", kb, v)
 		else
 			return string.format("%.2f Kb (%s)",kb,v)
-			totalKB = totalKB + kb
 		end
 	end, "MEM")
 end

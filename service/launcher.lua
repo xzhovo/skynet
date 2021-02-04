@@ -34,22 +34,26 @@ local function list_srv(ti, fmt_func, ...)
 	end
 	for req, resp in req:select(ti) do
 		local addr = req[1]
+		local name = services[addr]
 		if resp then
 			local stat = resp[1]
-			list[skynet.address(addr)] = fmt_func(stat, addr)
+			list[skynet.address(addr)] = fmt_func(stat, addr, name)
 		else
-			list[skynet.address(addr)] = fmt_func("ERROR", addr)
+			list[skynet.address(addr)] = fmt_func("ERROR", addr, name)
 		end
 		sessions[req] = nil
 	end
 	for session, addr in pairs(sessions) do
-		list[skynet.address(addr)] = fmt_func("TIMEOUT", addr)
+		list[skynet.address(addr)] = fmt_func("TIMEOUT", addr, name)
 	end
 	return list
 end
 
 function command.STAT(addr, ti)
-	return list_srv(ti, function(v) return v end, "STAT")
+	return list_srv(ti, function(v, addr, name)
+		v.xname = name
+		return v
+	end, "STAT")
 end
 
 function command.KILL(_, handle)
@@ -60,14 +64,18 @@ function command.KILL(_, handle)
 end
 
 function command.MEM(addr, ti)
-	return list_srv(ti, function(kb, addr)
+	local totalKB = 0
+	local list = list_srv(ti, function(kb, addr)
 		local v = services[addr]
+		totalKB = totalKB + tonumber(kb)
 		if type(kb) == "string" then
 			return string.format("%s (%s)", kb, v)
 		else
 			return string.format("%.2f Kb (%s)",kb,v)
 		end
 	end, "MEM")
+	list["total mem "] = string.format("%.2f M", totalKB/1024)
+	return list
 end
 
 function command.GC(addr, ti)

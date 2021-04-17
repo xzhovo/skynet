@@ -507,18 +507,20 @@ luaopen_skynet_core(lua_State *L) {
 		{ NULL, NULL },
 	};
 
-	lua_createtable(L, 0, sizeof(l)/sizeof(l[0]) + sizeof(l2)/sizeof(l2[0]) -2);
+	lua_createtable(L, 0, sizeof(l)/sizeof(l[0]) + sizeof(l2)/sizeof(l2[0]) -2); // 创建空表，压栈
 
-	lua_getfield(L, LUA_REGISTRYINDEX, "skynet_context");
+	lua_getfield(L, LUA_REGISTRYINDEX, "skynet_context"); // 获取 service_snlua.c init_cb 注册的服务上下文，压栈
 	struct skynet_context *ctx = lua_touserdata(L,-1);
 	if (ctx == NULL) {
 		return luaL_error(L, "Init skynet context first");
 	}
 
 
-	luaL_setfuncs(L,l,1);
+	luaL_setfuncs(L,l,1); // 把 l 注册到 lua_createtable 创建的表里，并带上一个参数ctx做上引值
 
-	luaL_setfuncs(L,l2,0);
+	luaL_setfuncs(L,l2,0); // 把 l2 注册到 lua_createtable 创建的表里
+
+	// 调用时：栈第一位函数，第二位上引值，后置位为lua传参压栈
 
 	return 1;
 }
